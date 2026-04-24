@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from '../types.ts';
 import { motion } from 'motion/react';
 import { Lock, Mail, Loader2 } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface LoginProps {
   onLogin: (user: User, token: string) => void;
@@ -12,6 +13,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [configured, setConfigured] = useState(true);
 
   const schoolName = (() => {
     try {
@@ -24,24 +26,58 @@ export default function Login({ onLogin }: LoginProps) {
     }
   })();
 
+  useEffect(() => {
+    setConfigured(isSupabaseConfigured());
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
+    if (!configured) {
+      setError('Supabase not configured. Please set environment variables.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Login failed');
+      if (authError) {
+        throw new Error(authError.message);
+      }
 
-      onLogin(data.user, data.token);
+      if (!data.user) {
+        throw new Error('Login failed');
+      }
+
+      // Get user role from public.users table
+      const { data: localUser, error: userError } = await supabase
+        .from('users')
+        .select('id, full_name, role')
+        .eq('user_id', data.user.id)
+        .single();
+
+      if (userError || !localUser) {
+        await supabase.auth.signOut();
+        throw new Error('User not registered in system. Contact admin to create account.');
+      }
+
+      const user: User = {
+        id: localUser.id,
+        full_name: localUser.full_name,
+        role: localUser.role,
+      };
+
+      const token = data.session?.access_token || '';
+      
+      onLogin(user, token);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -77,7 +113,7 @@ export default function Login({ onLogin }: LoginProps) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="input-app pl-10"
-                  placeholder="admin@school.sc.tz"
+                  placeholder="admin@kitukutu.sc.tz"
                   required
                 />
               </div>

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from './types.ts';
+import { supabase } from './lib/supabase';
 
 // Components
 import Login from './components/Login.tsx';
@@ -139,11 +140,16 @@ export default function App() {
     setView('dashboard');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Ignore supabase errors on logout
+    }
   };
 
   if (!user) {

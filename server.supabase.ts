@@ -1,6 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+
+// Load .env file
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,14 +14,18 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL ||
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('ERROR: Supabase environment variables not set');
-  console.error('Please set VITE_SUPABASE_URL and SUPABASE_SERVICE_KEY');
-  process.exit(1);
+  console.warn('WARNING: Supabase not configured. Running in offline/demo mode.');
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false }
-});
+const supabase = supabaseUrl && supabaseServiceKey 
+  ? createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } })
+  : null;
+
+if (supabase) {
+  console.log('Supabase connected');
+} else {
+  console.log('Running without Supabase (demo mode)');
+}
 
 app.use(cors());
 app.use(express.json());
