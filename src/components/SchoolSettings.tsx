@@ -138,7 +138,7 @@ export default function SchoolSettings({ token }: Props) {
                 value={data.school_name}
                 onChange={e => setData({ ...data, school_name: e.target.value })}
                 required
-                placeholder="Kizaga Secondary School"
+                placeholder="Kitukutu Technical School"
                 disabled={loading || saving}
               />
             </div>

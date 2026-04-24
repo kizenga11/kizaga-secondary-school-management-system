@@ -59,7 +59,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    return { school_name: 'KIZAGA S.S.' };
+    return { school_name: 'KITUKUTU TECHNICAL SCHOOL' };
   });
 
   const fetchSchoolSettings = async (authToken: string) => {
