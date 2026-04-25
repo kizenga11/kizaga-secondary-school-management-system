@@ -1,39 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { Save } from 'lucide-react';
 import { User } from '../types.ts';
+import { useToast } from './Toast';
 
-type Props = {
+interface MyProfileProps {
   token: string;
   user: User;
-  onUserUpdated: (u: User) => void;
-};
+  onUserUpdated: (user: User) => void;
+}
 
-type Profile = {
-  full_name: string;
-  gender: string;
-  education_level: string;
-  studied_subjects: string;
-  teaching_subjects: string;
-  tsc_no: string;
-  cheque_no: string;
-  employment_date: string;
-  confirmation_date: string;
-  retirement_date: string;
-  salary_scale: string;
-  date_of_birth: string;
-  nida_no: string;
-};
-
-export default function MyProfile({ token, user, onUserUpdated }: Props) {
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [data, setData] = useState<Profile>({
-    full_name: user.full_name || '',
+export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps) {
+  const [data, setData] = useState({
+    full_name: '',
+    tsc_no: '',
+    email: '',
+    phone: '',
     gender: '',
     education_level: '',
     studied_subjects: '',
     teaching_subjects: '',
-    tsc_no: user.tsc_no || '',
     cheque_no: '',
     employment_date: '',
     confirmation_date: '',
@@ -42,55 +26,68 @@ export default function MyProfile({ token, user, onUserUpdated }: Props) {
     date_of_birth: '',
     nida_no: '',
   });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const { showSuccess, showError } = useToast();
+
+  useEffect(() => {
+    fetchProfile();
+  }, []);
 
   const fetchProfile = async () => {
-    setLoading(true);
     try {
       const res = await fetch('/api/users/me', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        alert(json?.error || 'Failed to load profile');
-        return;
+        throw new Error(json?.error || 'Failed to load profile');
       }
       setData({
-        full_name: json?.full_name || user.full_name || '',
-        gender: json?.gender || '',
-        education_level: json?.education_level || '',
-        studied_subjects: json?.studied_subjects || '',
-        teaching_subjects: json?.teaching_subjects || '',
-        tsc_no: json?.tsc_no || user.tsc_no || '',
-        cheque_no: json?.cheque_no || '',
-        employment_date: json?.employment_date || '',
-        confirmation_date: json?.confirmation_date || '',
-        retirement_date: json?.retirement_date || '',
-        salary_scale: json?.salary_scale || '',
-        date_of_birth: json?.date_of_birth || '',
-        nida_no: json?.nida_no || '',
+        full_name: json.full_name || '',
+        tsc_no: json.tsc_no || '',
+        email: json.email || '',
+        phone: json.phone || '',
+        gender: json.gender || '',
+        education_level: json.education_level || '',
+        studied_subjects: json.studied_subjects || '',
+        teaching_subjects: json.teaching_subjects || '',
+        cheque_no: json.cheque_no || '',
+        employment_date: json.employment_date || '',
+        confirmation_date: json.confirmation_date || '',
+        retirement_date: json.retirement_date || '',
+        salary_scale: json.salary_scale || '',
+        date_of_birth: json.date_of_birth || '',
+        nida_no: json.nida_no || '',
       });
+    } catch (e: any) {
+      showError(e?.message || 'Failed to load profile');
     } finally {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchProfile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const namesCount = String(data.full_name || '').trim().split(/\s+/).filter(Boolean).length;
     if (namesCount < 3) {
-      alert('Full Name must contain at least 3 names.');
+      showError('Full Name must contain at least 3 names (First Middle Last)');
       return;
     }
     if (data.nida_no && !/^\d{20}$/.test(String(data.nida_no).trim())) {
-      alert('NIDA Number must be exactly 20 digits.');
+      showError('NIDA Number must be exactly 20 digits');
       return;
     }
+
+    // Convert empty strings to null for date fields
+    const body = {
+      ...data,
+      employment_date: data.employment_date || null,
+      confirmation_date: data.confirmation_date || null,
+      retirement_date: data.retirement_date || null,
+      date_of_birth: data.date_of_birth || null,
+    };
 
     setSaving(true);
     try {
@@ -100,13 +97,12 @@ export default function MyProfile({ token, user, onUserUpdated }: Props) {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
         const msg = json?.error || `Failed to save profile (HTTP ${res.status})`;
-        alert(msg);
-        console.error('Save profile error:', res.status, json);
+        showError(msg);
         return;
       }
 
@@ -118,201 +114,176 @@ export default function MyProfile({ token, user, onUserUpdated }: Props) {
         // ignore
       }
 
-      alert('Profile saved successfully.');
+      showSuccess('Profile saved successfully.');
     } finally {
       setSaving(false);
     }
   };
 
+  if (loading) {
+    return <div className="p-8 text-center text-slate-400">Loading profile...</div>;
+  }
+
   return (
     <div className="space-y-6">
       <header className="section-header">
         <div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">MY <span className="text-brand-primary">PROFILE</span></h2>
-          <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest opacity-60">Fill your staff details for reporting</p>
+          <h2 className="text-2xl font-black text-slate-800">MY <span className="text-brand-primary">PROFILE</span></h2>
+          <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest opacity-60">Personal information & employment details</p>
         </div>
       </header>
 
-      <div className="card-app p-6">
-        <form onSubmit={save} className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="label-app">Full Name (3 Names)</label>
-              <input
-                className="input-app"
-                value={data.full_name}
-                onChange={e => setData({ ...data, full_name: e.target.value })}
-                required
-                disabled={loading || saving}
-                placeholder="First Middle Last"
-              />
-            </div>
-
-            <div>
-              <label className="label-app">Gender</label>
-              <select
-                className="input-app"
-                value={data.gender}
-                onChange={e => setData({ ...data, gender: e.target.value })}
-                disabled={loading || saving}
-                required
-              >
-                <option value="">Select gender</option>
-                <option value="M">Male</option>
-                <option value="F">Female</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="label-app">Education Level</label>
-              <select
-                className="input-app"
-                value={data.education_level}
-                onChange={e => setData({ ...data, education_level: e.target.value })}
-                disabled={loading || saving}
-                required
-              >
-                <option value="">Select level</option>
-                <option value="Certificate">Certificate</option>
-                <option value="Diploma">Diploma</option>
-                <option value="Bachelor">Bachelor Degree</option>
-                <option value="Masters">Masters</option>
-                <option value="PhD">PhD</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="label-app">Salary Scale</label>
-              <input
-                className="input-app"
-                value={data.salary_scale}
-                onChange={e => setData({ ...data, salary_scale: e.target.value })}
-                disabled={loading || saving}
-                placeholder="e.g. TGTS D1"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="label-app">TSC Number</label>
-              <input
-                className="input-app font-mono"
-                value={data.tsc_no}
-                onChange={e => setData({ ...data, tsc_no: e.target.value })}
-                disabled={loading || saving}
-                placeholder="TSC-123456"
-              />
-            </div>
-
-            <div>
-              <label className="label-app">Cheque Number</label>
-              <input
-                className="input-app font-mono"
-                value={data.cheque_no}
-                onChange={e => setData({ ...data, cheque_no: e.target.value })}
-                disabled={loading || saving}
-                placeholder="Cheque No"
-              />
-            </div>
-          </div>
-
+      <form onSubmit={save} className="card-app p-6 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="label-app">Subjects Studied</label>
-            <textarea
-              className="input-app min-h-24"
-              value={data.studied_subjects}
-              onChange={e => setData({ ...data, studied_subjects: e.target.value })}
-              disabled={loading || saving}
-              placeholder="Write subjects separated by commas"
-            />
-          </div>
-
-          <div>
-            <label className="label-app">Subjects Taught</label>
-            <textarea
-              className="input-app min-h-24"
-              value={data.teaching_subjects}
-              onChange={e => setData({ ...data, teaching_subjects: e.target.value })}
-              disabled={loading || saving}
-              placeholder="Write subjects separated by commas"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="label-app">Employment Date</label>
-              <input
-                type="date"
-                className="input-app"
-                value={data.employment_date}
-                onChange={e => setData({ ...data, employment_date: e.target.value })}
-                disabled={loading || saving}
-              />
-            </div>
-            <div>
-              <label className="label-app">Confirmation Date</label>
-              <input
-                type="date"
-                className="input-app"
-                value={data.confirmation_date}
-                onChange={e => setData({ ...data, confirmation_date: e.target.value })}
-                disabled={loading || saving}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="label-app">Retirement Date</label>
-              <input
-                type="date"
-                className="input-app"
-                value={data.retirement_date}
-                onChange={e => setData({ ...data, retirement_date: e.target.value })}
-                disabled={loading || saving}
-              />
-            </div>
-
-            <div>
-              <label className="label-app">Date of Birth</label>
-              <input
-                type="date"
-                className="input-app"
-                value={data.date_of_birth}
-                onChange={e => setData({ ...data, date_of_birth: e.target.value })}
-                disabled={loading || saving}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="label-app">NIDA Number (20 digits)</label>
+            <label className="label-app">Full Name</label>
             <input
-              className="input-app font-mono"
-              value={data.nida_no}
-              onChange={e => setData({ ...data, nida_no: e.target.value })}
-              disabled={loading || saving}
-              placeholder="20 digits"
-              inputMode="numeric"
-              required
+              type="text"
+              value={data.full_name}
+              onChange={(e) => setData({ ...data, full_name: e.target.value })}
+              className="input-app"
+              placeholder="First Middle Last"
             />
-            <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-300 italic">
-              Must be exactly 20 digits.
-            </p>
           </div>
+          <div>
+            <label className="label-app">TSC Number</label>
+            <input
+              type="text"
+              value={data.tsc_no}
+              onChange={(e) => setData({ ...data, tsc_no: e.target.value })}
+              className="input-app"
+            />
+          </div>
+        </div>
 
-          <div className="pt-2 flex justify-end">
-            <button type="submit" className="btn-dark flex items-center gap-2 disabled:opacity-50" disabled={loading || saving}>
-              <Save size={16} />
-              <span>{saving ? 'Saving...' : 'Save Profile'}</span>
-            </button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="label-app">Email</label>
+            <input type="email" value={data.email} disabled className="input-app opacity-50" />
           </div>
-        </form>
-      </div>
+          <div>
+            <label className="label-app">Phone</label>
+            <input
+              type="text"
+              value={data.phone}
+              onChange={(e) => setData({ ...data, phone: e.target.value })}
+              className="input-app"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="label-app">Gender</label>
+            <select
+              value={data.gender}
+              onChange={(e) => setData({ ...data, gender: e.target.value })}
+              className="input-app"
+            >
+              <option value="">Select</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </div>
+          <div>
+            <label className="label-app">Date of Birth</label>
+            <input
+              type="date"
+              value={data.date_of_birth}
+              onChange={(e) => setData({ ...data, date_of_birth: e.target.value })}
+              className="input-app"
+            />
+          </div>
+          <div>
+            <label className="label-app">NIDA Number</label>
+            <input
+              type="text"
+              value={data.nida_no}
+              onChange={(e) => setData({ ...data, nida_no: e.target.value })}
+              className="input-app"
+              placeholder="20 digits"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="label-app">Education Level</label>
+            <input
+              type="text"
+              value={data.education_level}
+              onChange={(e) => setData({ ...data, education_level: e.target.value })}
+              className="input-app"
+              placeholder="Degree, Diploma..."
+            />
+          </div>
+          <div>
+            <label className="label-app">Salary Scale</label>
+            <input
+              type="text"
+              value={data.salary_scale}
+              onChange={(e) => setData({ ...data, salary_scale: e.target.value })}
+              className="input-app"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="label-app">Employment Date</label>
+            <input
+              type="date"
+              value={data.employment_date}
+              onChange={(e) => setData({ ...data, employment_date: e.target.value })}
+              className="input-app"
+            />
+          </div>
+          <div>
+            <label className="label-app">Confirmation Date</label>
+            <input
+              type="date"
+              value={data.confirmation_date}
+              onChange={(e) => setData({ ...data, confirmation_date: e.target.value })}
+              className="input-app"
+            />
+          </div>
+          <div>
+            <label className="label-app">Retirement Date</label>
+            <input
+              type="date"
+              value={data.retirement_date}
+              onChange={(e) => setData({ ...data, retirement_date: e.target.value })}
+              className="input-app"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="label-app">Subjects Studied</label>
+          <textarea
+            rows={2}
+            value={data.studied_subjects}
+            onChange={(e) => setData({ ...data, studied_subjects: e.target.value })}
+            className="input-app resize-none"
+          />
+        </div>
+
+        <div>
+          <label className="label-app">Subjects to Teach</label>
+          <textarea
+            rows={2}
+            value={data.teaching_subjects}
+            onChange={(e) => setData({ ...data, teaching_subjects: e.target.value })}
+            className="input-app resize-none"
+          />
+        </div>
+
+        <div className="pt-4">
+          <button type="submit" disabled={saving} className="btn-dark">
+            {saving ? 'Saving...' : 'Save Profile'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

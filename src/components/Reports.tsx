@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, FileText } from 'lucide-react';
+import { useToast } from './Toast';
 
 interface ReportsProps {
   token: string;
@@ -96,6 +97,7 @@ function downloadXlsx(filename: string, sheetName: string, aoa: any[][]) {
 export default function Reports({ token }: ReportsProps) {
   const [tab, setTab] = useState<'teaching' | 'exams' | 'students' | 'teachers'>('teaching');
   const [loading, setLoading] = useState(false);
+  const { showError } = useToast();
 
   const forms = ['All', 'Form 1', 'Form 2', 'Form 3', 'Form 4'];
   const [formFilter, setFormFilter] = useState<string>('All');
@@ -136,7 +138,7 @@ export default function Reports({ token }: ReportsProps) {
       const res = await fetch(`/api/reports/teaching${queryForm}`, { headers: authHeaders });
       const json = await res.json().catch(() => []);
       if (!res.ok) {
-        alert(json?.error || 'Failed to load teaching report');
+        showError(json?.error || 'Failed to load teaching report');
         return;
       }
       setTeachingRows(json || []);
@@ -151,7 +153,7 @@ export default function Reports({ token }: ReportsProps) {
       const res = await fetch(`/api/reports/exams?exam_id=${examId}`, { headers: authHeaders });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        alert(json?.error || 'Failed to load exam report');
+        showError(json?.error || 'Failed to load exam report');
         return;
       }
       setExamMeta(json?.exam || null);
@@ -167,7 +169,7 @@ export default function Reports({ token }: ReportsProps) {
       const res = await fetch(`/api/reports/students${queryForm}`, { headers: authHeaders });
       const json = await res.json().catch(() => []);
       if (!res.ok) {
-        alert(json?.error || 'Failed to load students report');
+        showError(json?.error || 'Failed to load students report');
         return;
       }
       setStudentRows(json || []);
@@ -183,7 +185,7 @@ export default function Reports({ token }: ReportsProps) {
       const res = await fetch(`/api/reports/teachers${q}`, { headers: authHeaders });
       const json = await res.json().catch(() => []);
       if (!res.ok) {
-        alert(json?.error || 'Failed to load teachers report');
+        showError(json?.error || 'Failed to load teachers report');
         return;
       }
       setTeacherRows(json || []);
@@ -195,26 +197,22 @@ export default function Reports({ token }: ReportsProps) {
   useEffect(() => {
     fetchExams();
     fetchUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (tab === 'teaching') fetchTeaching();
     if (tab === 'students') fetchStudentsReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, formFilter]);
 
   useEffect(() => {
     if (tab !== 'exams') return;
     if (!selectedExamId) return;
     fetchExamReport(selectedExamId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, selectedExamId]);
 
   useEffect(() => {
     if (tab !== 'teachers') return;
     fetchTeachersReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, selectedUserId]);
 
   const downloadTeaching = () => {

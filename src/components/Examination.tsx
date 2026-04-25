@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ErrorBoundary } from 'react-error-boundary';
 import { Plus, X, Download, FileText, Users, TrendingUp, Activity, CheckCircle2, AlertTriangle, ChevronDown, ClipboardList } from 'lucide-react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
+import { useToast } from './Toast';
 
 interface Exam {
   id: number;
@@ -61,7 +63,8 @@ interface ExaminationProps {
   userId: number;
 }
 
-export default function Examination({ token, userRole }: ExaminationProps) {
+function Examination({ token, userRole }: ExaminationProps) {
+  const toast = useToast();
   const [tab, setTab] = useState<'setup' | 'scores' | 'results' | 'compose' | 'reports'>('setup');
   const [exams, setExams] = useState<Exam[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -78,7 +81,7 @@ export default function Examination({ token, userRole }: ExaminationProps) {
   const [showScoresModal, setShowScoresModal] = useState(false);
   const [editingScores, setEditingScores] = useState<Record<number, Record<number, { score: string; absent: boolean }>>({});
 
-  const [newExam, setNewExam] = useState({ name: '', type: 'Test', form: 'Form 1', academic_year: '2026', term: 'Term 1', start_date: '', end_date: '', weight: 1 });
+  const [newExam, setNewExam] = useState({ name: '', form: 'Form 1' });
   const [composeData, setComposeData] = useState({ name: '', exam_weights: [] as { exam_id: number; weight: number }[] });
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -125,12 +128,12 @@ export default function Examination({ token, userRole }: ExaminationProps) {
     const res = await fetch('/api/exams', {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(newExam),
+      body: JSON.stringify({ name: newExam.name, form: newExam.form }),
     });
     if (res.ok) {
       const data = await res.json();
       setShowNewExamModal(false);
-      setNewExam({ name: '', type: 'Test', form: 'Form 1', academic_year: '2026', term: 'Term 1', start_date: '', end_date: '', weight: 1 });
+      setNewExam({ name: '', form: 'Form 1' });
       await fetchExams();
       setSelectedExam({ ...newExam, id: data.id } as Exam);
       setShowScoresModal(true);
@@ -161,7 +164,7 @@ export default function Examination({ token, userRole }: ExaminationProps) {
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ scores: flatScores }),
     });
-    alert('Scores saved!');
+    toast.showSuccess('Scores saved!');
     fetchExamDetails();
   };
 
@@ -172,7 +175,7 @@ export default function Examination({ token, userRole }: ExaminationProps) {
     try {
       const res = await fetch(`/api/exams/${selectedExam.id}/process`, { method: 'POST', headers });
       const data = await res.json();
-      alert(`Processed ${data.students} student results`);
+      toast.showSuccess(`Processed ${data.students} student results`);
       fetchExamDetails();
     } finally {
       setLoading(false);
@@ -208,7 +211,7 @@ export default function Examination({ token, userRole }: ExaminationProps) {
       body: JSON.stringify({ ...composeData, form: selectedExam?.form || 'Form 1', academic_year: selectedExam?.academic_year || '2026' }),
     });
     if (res.ok) {
-      alert('Composition created!');
+      toast.showSuccess('Composition created!');
       setShowComposeModal(false);
       setComposeData({ name: '', exam_weights: [] });
     }
@@ -580,40 +583,10 @@ export default function Examination({ token, userRole }: ExaminationProps) {
                     <input type="text" value={newExam.name} onChange={e => setNewExam({ ...newExam, name: e.target.value })} className="input-app" placeholder="e.g. Midterm 2026" required />
                   </div>
                   <div>
-                    <label className="label-app">Type</label>
-                    <select value={newExam.type} onChange={e => setNewExam({ ...newExam, type: e.target.value })} className="input-app">
-                      <option value="Test">Test</option>
-                      <option value="Monthly Test">Monthly Test</option>
-                      <option value="Midterm">Midterm</option>
-                      <option value="Terminal">Terminal</option>
-                      <option value="Mock">Mock</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
                     <label className="label-app">Class</label>
                     <select value={newExam.form} onChange={e => setNewExam({ ...newExam, form: e.target.value })} className="input-app">
                       {['Form 1', 'Form 2', 'Form 3', 'Form 4'].map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
-                  </div>
-                  <div>
-                    <label className="label-app">Academic Year</label>
-                    <input type="number" value={newExam.academic_year} onChange={e => setNewExam({ ...newExam, academic_year: e.target.value })} className="input-app" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="label-app">Term</label>
-                    <select value={newExam.term} onChange={e => setNewExam({ ...newExam, term: e.target.value })} className="input-app">
-                      <option value="Term 1">Term 1</option>
-                      <option value="Term 2">Term 2</option>
-                      <option value="Term 3">Term 3</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label-app">Weight (%)</label>
-                    <input type="number" value={newExam.weight} onChange={e => setNewExam({ ...newExam, weight: Number(e.target.value) })} className="input-app" />
                   </div>
                 </div>
               </div>
@@ -626,5 +599,23 @@ export default function Examination({ token, userRole }: ExaminationProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function ExamFallback({ error }: { error: Error }) {
+  return (
+    <div className="p-8 text-center text-rose-600">
+      <h2>Examination view crashed</h2>
+      <p className="text-sm">{error.message}</p>
+    </div>
+  );
+}
+
+// Export wrapped component
+export default function ExaminationWithErrorBoundary(props: ExaminationProps) {
+  return (
+    <ErrorBoundary FallbackComponent={ExamFallback}>
+      <Examination {...props} />
+    </ErrorBoundary>
   );
 }

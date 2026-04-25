@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Subject } from '../types.ts';
 import { Plus, Pencil, Trash2, Layers } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useToast } from './Toast';
 
 type Stream = {
   id: number;
@@ -15,6 +16,7 @@ interface StreamsProps {
 }
 
 export default function Streams({ token }: StreamsProps) {
+  const toast = useToast();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [streams, setStreams] = useState<Stream[]>([]);
   const [selectedForm, setSelectedForm] = useState<string>('Form 1');
@@ -36,24 +38,26 @@ export default function Streams({ token }: StreamsProps) {
   }, [selectedForm]);
 
   useEffect(() => {
-    const s = streams.find(x => x.id === selectedStreamId);
+    const arr = Array.isArray(streams) ? streams : [];
+    const s = arr.find(x => x.id === selectedStreamId);
     setSelectedSubjectIds(s ? (s.subject_ids || []) : []);
   }, [selectedStreamId, streams]);
 
   const subjectsForForm = useMemo(
-    () => subjects.filter(s => s.form === selectedForm),
+    () => (Array.isArray(subjects) ? subjects : []).filter(s => s.form === selectedForm),
     [subjects, selectedForm]
   );
 
   const streamsForForm = useMemo(
-    () => streams.filter(s => s.form === selectedForm),
+    () => (Array.isArray(streams) ? streams : []).filter(s => s.form === selectedForm),
     [streams, selectedForm]
   );
 
   const fetchSubjects = async () => {
     const res = await fetch('/api/subjects', { headers: { 'Authorization': `Bearer ${token}` } });
     const data = await res.json();
-    setSubjects((data || []).map((s: any) => ({ ...s, has_practical: Boolean(s.has_practical) })));
+    const arr = Array.isArray(data) ? data : [];
+    setSubjects(arr.map((s: any) => ({ ...s, has_practical: Boolean(s.has_practical) })));
   };
 
   const fetchStreams = async () => {
@@ -63,10 +67,14 @@ export default function Streams({ token }: StreamsProps) {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setStreams(data || []);
+      const arr = Array.isArray(data) ? data : [];
+      setStreams(arr);
 
-      const first = (data || [])[0];
+      const first = arr[0];
       setSelectedStreamId(first ? first.id : null);
+    } catch {
+      setStreams([]);
+      setSelectedStreamId(null);
     } finally {
       setLoading(false);
     }
@@ -100,13 +108,14 @@ export default function Streams({ token }: StreamsProps) {
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      alert(data?.error || 'Failed to save stream');
+      toast.showError(data?.error || 'Failed to save stream');
       return;
     }
 
     setShowModal(false);
     setEditingId(null);
     setSelectedForm(streamData.form);
+    toast.showSuccess('Stream saved successfully!');
     await fetchStreams();
   };
 
@@ -118,10 +127,12 @@ export default function Streams({ token }: StreamsProps) {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      alert(data?.error || 'Failed to delete stream');
+      toast.showError(data?.error || 'Failed to delete stream');
       return;
     }
     await fetchStreams();
+    setSelectedStreamId(null);
+    toast.showSuccess('Stream deleted successfully!');
   };
 
   const toggleSubject = (id: number) => {
@@ -141,11 +152,13 @@ export default function Streams({ token }: StreamsProps) {
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      alert(data?.error || 'Failed to update subjects');
+      toast.showError(data?.error || 'Failed to update subjects');
       return;
     }
 
     await fetchStreams();
+    setSelectedStreamId(null);
+    toast.showSuccess('Subjects updated successfully!');
   };
 
   return (
@@ -306,7 +319,7 @@ export default function Streams({ token }: StreamsProps) {
 
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="label-app">Class/Form</label>
+                  <label className="label-app">Form</label>
                   <select
                     className="input-app"
                     value={streamData.form}
@@ -318,7 +331,7 @@ export default function Streams({ token }: StreamsProps) {
                   </select>
                 </div>
                 <div>
-                  <label className="label-app">Stream Name</label>
+                  <label className="label-app">Name</label>
                   <input
                     className="input-app"
                     required

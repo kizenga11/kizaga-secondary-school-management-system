@@ -15,6 +15,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useToast } from './Toast';
 
 interface StudentsListProps {
   token: string;
@@ -28,6 +29,7 @@ type Stream = {
 };
 
 export default function StudentsList({ token }: StudentsListProps) {
+  const toast = useToast();
   const [students, setStudents] = useState<Student[]>([]);
   const [streams, setStreams] = useState<Stream[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -38,10 +40,13 @@ export default function StudentsList({ token }: StudentsListProps) {
   const [selectedForm, setSelectedForm] = useState('');
   const [formData, setFormData] = useState({
     full_name: '',
-    gender: 'M',
+    gender: 'Male',
     form: 'Form 1',
     parent_phone: '',
     stream_id: null as number | null,
+    parent_name: '',
+    date_of_birth: '',
+    address: ''
   });
 
   const [csvPreview, setCsvPreview] = useState<any[]>([]);
@@ -63,19 +68,38 @@ export default function StudentsList({ token }: StudentsListProps) {
   }, [showModal, formData.form]);
 
   const fetchStudents = async () => {
-    const res = await fetch('/api/students', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await res.json();
-    setStudents(data);
+    try {
+      const res = await fetch('/api/students', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+       const fixedData = (Array.isArray(data) ? data : []).map(student => {
+         if (student.stream_id && !student.stream_name) {
+           const stream = streams.find(s => s.id === student.stream_id);
+           if (stream) {
+             return { ...student, stream_name: stream.name };
+           }
+         }
+         return student;
+       });
+       setStudents(fixedData);
+    } catch (err) {
+      console.error('Failed to fetch students:', err);
+      setStudents([]);
+    }
   };
 
   const fetchStreamsForForm = async (form: string) => {
-    const res = await fetch(`/api/streams?form=${encodeURIComponent(form)}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await res.json();
-    setStreams(data || []);
+    try {
+      const res = await fetch(`/api/streams?form=${encodeURIComponent(form)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setStreams(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch streams:', err);
+      setStreams([]);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -93,25 +117,34 @@ export default function StudentsList({ token }: StudentsListProps) {
     });
     
     if (res.ok) {
+      toast.showSuccess(editingStudent ? 'Student updated successfully!' : 'Student registered successfully!');
       handleCloseModal();
       fetchStudents();
+    } else {
+      const errorData = await res.json().catch(() => null);
+      const errorMessage = errorData?.error || 'Failed to save student';
+      toast.showError(errorMessage);
     }
   };
 
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingStudent(null);
-    setFormData({ full_name: '', gender: 'M', form: 'Form 1', parent_phone: '', stream_id: null });
+    setFormData({ full_name: '', gender: 'Male', form: 'Form 1', parent_phone: '', stream_id: null, parent_name: '', date_of_birth: '', address: '' });
   };
 
   const handleEdit = (student: Student) => {
+    const genderValue = student.gender === 'Male' ? 'Male' : student.gender === 'Female' ? 'Female' : student.gender || 'Male';
     setEditingStudent(student);
     setFormData({
       full_name: student.full_name,
-      gender: student.gender,
+      gender: genderValue,
       form: student.form,
       parent_phone: student.parent_phone || '',
       stream_id: student.stream_id ?? null,
+      parent_name: student.parent_name || '',
+      date_of_birth: student.date_of_birth || '',
+      address: student.address || ''
     });
     setShowModal(true);
   };
@@ -133,7 +166,7 @@ export default function StudentsList({ token }: StudentsListProps) {
     if (res.ok) {
       setShowPromoteConfirm(false);
       fetchStudents();
-      alert('Promotion successful! Students have moved to the next academic level.');
+      toast.showSuccess('Promotion successful! Students have moved to the next academic level.');
     }
   };
 
@@ -256,7 +289,7 @@ export default function StudentsList({ token }: StudentsListProps) {
                   <td className="px-6 py-3 font-semibold text-slate-700">{s.full_name}</td>
                   <td className="px-6 py-3 text-center">
                     <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter bg-brand-primary/10 text-brand-primary">
-                      {s.gender === 'M' ? 'Male' : 'Female'}
+                      {s.gender === 'M' || s.gender === 'Male' ? 'Male' : s.gender === 'F' || s.gender === 'Female' ? 'Female' : s.gender}
                     </span>
                   </td>
                   <td className="px-6 py-3 text-center">
@@ -298,7 +331,7 @@ export default function StudentsList({ token }: StudentsListProps) {
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
-              className="bg-white w-full max-w-md rounded-xl overflow-hidden shadow-2xl border border-slate-200"
+               className="bg-white w-full max-w-md max-h-screen md:max-h-[650px] rounded-xl overflow-auto shadow-2xl border border-slate-200"
             >
               <form onSubmit={handleSubmit}>
                 <div className="bg-brand-sidebar p-5 text-white flex justify-between items-center">
@@ -312,7 +345,7 @@ export default function StudentsList({ token }: StudentsListProps) {
                 </div>
                 <div className="p-6 space-y-4">
                   <div>
-                    <label className="label-app">Full Name (Majina 3)</label>
+                    <label className="label-app">Full Name</label>
                     <input 
                       type="text" required 
                       value={formData.full_name}
@@ -324,14 +357,16 @@ export default function StudentsList({ token }: StudentsListProps) {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="label-app">Gender</label>
-                      <select 
-                        value={formData.gender}
-                        onChange={e => setFormData({...formData, gender: e.target.value})}
-                        className="input-app"
-                      >
-                        <option value="M">Male (M)</option>
-                        <option value="F">Female (F)</option>
-                      </select>
+<select 
+  value={formData.gender}
+  onChange={e => setFormData({...formData, gender: e.target.value})}
+  className="input-app"
+  required
+>
+  <option value="Male">Male</option>
+  <option value="Female">Female</option>
+</select>
+<span className="text-xs text-slate-400 italic">Use 'Male' or 'Female' only</span>
                     </div>
                     <div>
                       <label className="label-app">Academic Level</label>
@@ -361,8 +396,8 @@ export default function StudentsList({ token }: StudentsListProps) {
                       disabled={formData.form === 'Graduated'}
                     >
                       <option value="">No stream</option>
-                      {streams.map(st => (
-                        <option key={st.id} value={st.id}>{st.name}</option>
+                      {(Array.isArray(streams) ? streams : []).map(stream => (
+                        <option key={stream.id} value={stream.id}>{stream.name}</option>
                       ))}
                     </select>
                     {formData.form !== 'Graduated' && streams.length === 0 && (
@@ -370,15 +405,44 @@ export default function StudentsList({ token }: StudentsListProps) {
                     )}
                   </div>
                   <div>
-                    <label className="label-app">Guardian Contact Number</label>
-                    <input 
-                      type="tel" 
-                      value={formData.parent_phone}
-                      onChange={e => setFormData({...formData, parent_phone: e.target.value})}
-                      className="input-app"
-                      placeholder="e.g. 0712 000 000"
-                    />
-                  </div>
+  <label className="label-app">Parent Phone</label>
+  <input 
+    type="tel" 
+    value={formData.parent_phone}
+    onChange={e => setFormData({...formData, parent_phone: e.target.value})}
+    className="input-app"
+    placeholder="e.g. 0712 000 000"
+  />
+</div>
+<div>
+  <label className="label-app">Parent Name</label>
+  <input 
+    type="text" 
+    value={formData.parent_name || ''}
+    onChange={e => setFormData({...formData, parent_name: e.target.value})}
+    className="input-app"
+    placeholder="e.g. Jane Doe"
+  />
+</div>
+<div>
+  <label className="label-app">Date of Birth</label>
+  <input 
+    type="date" 
+    value={formData.date_of_birth || ''}
+    onChange={e => setFormData({...formData, date_of_birth: e.target.value})}
+    className="input-app"
+  />
+</div>
+<div>
+  <label className="label-app">Address</label>
+  <input 
+    type="text" 
+    value={formData.address || ''}
+    onChange={e => setFormData({...formData, address: e.target.value})}
+    className="input-app"
+    placeholder="Postal address"
+  />
+</div>
                 </div>
                 <div className="p-4 bg-slate-50 flex justify-end space-x-2 border-t border-slate-200">
                   <button type="button" onClick={handleCloseModal} className="px-4 py-2 text-slate-500 font-bold text-[10px] uppercase tracking-widest transition-colors hover:text-slate-700">Cancel</button>

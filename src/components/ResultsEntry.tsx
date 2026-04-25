@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Exam, Student, Subject, Result } from '../types.ts';
 import { Save, Plus, ClipboardList, Search, GraduationCap, X } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useToast } from './Toast';
 
 interface ResultsEntryProps {
   token: string;
@@ -9,6 +10,7 @@ interface ResultsEntryProps {
 }
 
 export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
+  const toast = useToast();
   const [exams, setExams] = useState<Exam[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -114,7 +116,7 @@ export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
   const handleSave = async () => {
     if (!selectedExam || !selectedSubject) return;
     if (component === null) {
-      alert('Chagua Theory au Practical kwanza.');
+      toast.showError('Chagua Theory au Practical kwanza.');
       return;
     }
     setLoading(true);
@@ -135,7 +137,7 @@ export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
         })
       });
     }
-    alert('Matokeo yamehifadhiwa kikamilifu!');
+    toast.showSuccess('Matokeo yamehifadhiwa kikamilifu!');
     setLoading(false);
   };
 

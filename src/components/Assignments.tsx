@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Subject, User } from '../types.ts';
 import { Plus, UserPlus, Trash2, Pencil, ShieldCheck, BookOpen, GraduationCap, Search } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useToast } from './Toast';
 
 interface AssignmentsProps {
   token: string;
 }
 
 export default function Assignments({ token }: AssignmentsProps) {
+  const toast = useToast();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
@@ -39,9 +41,9 @@ export default function Assignments({ token }: AssignmentsProps) {
         aRes.json()
       ]);
 
-      setSubjects(sData);
-      setTeachers(uData.filter((u: User) => u.role === 'teacher'));
-      setAssignments(aData);
+      setSubjects(Array.isArray(sData) ? sData : []);
+      setTeachers(Array.isArray(uData) ? uData.filter((u: User) => u.role === 'teacher') : []);
+      setAssignments(Array.isArray(aData) ? aData : []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -67,7 +69,7 @@ export default function Assignments({ token }: AssignmentsProps) {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (assignData.teacher_id === 0 || assignData.subject_id === 0) {
-      alert('Please select both staff and subject');
+      toast.showError('Please select both staff and subject');
       return;
     }
 
@@ -86,12 +88,13 @@ export default function Assignments({ token }: AssignmentsProps) {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        alert(data?.error || 'Failed to save deployment');
+        toast.showError(data?.error || 'Failed to save deployment');
         return;
       }
       setShowModal(false);
       setAssignData({ teacher_id: 0, subject_id: 0 });
       setEditingId(null);
+      toast.showSuccess('Deployment saved successfully!');
       fetchData();
     } catch (e) {
       console.error(e);
@@ -175,24 +178,29 @@ export default function Assignments({ token }: AssignmentsProps) {
               </tr>
             </thead>
             <tbody className="text-[13px] italic">
-              {assignments.map((a) => (
-                <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-8 h-8 rounded bg-slate-900 flex items-center justify-center text-[10px] font-bold text-white uppercase">
-                        {a.teacher_name.charAt(0)}
+              {assignments.map((a) => {
+                const teacherName = a.users?.full_name || 'Unknown';
+                const subjectName = a.subjects?.name || 'Unknown';
+                const form = a.subjects?.form || '—';
+
+                return (
+                  <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded bg-slate-900 flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                          {teacherName.charAt(0)}
+                        </div>
+                        <span className="font-bold text-slate-700">{teacherName}</span>
                       </div>
-                      <span className="font-bold text-slate-700">{a.teacher_name}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="bg-brand-primary/10 text-brand-primary px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-tight">
-                      {a.subject_name}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-slate-500 font-bold uppercase text-[11px] tracking-widest">
-                    {a.form}
-                  </td>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="bg-brand-primary/10 text-brand-primary px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-tight">
+                        {subjectName}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-slate-500 font-bold uppercase text-[11px] tracking-widest">
+                      {form}
+                    </td>
                   <td className="px-6 py-4 text-right opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => openEdit(a)}
@@ -212,7 +220,8 @@ export default function Assignments({ token }: AssignmentsProps) {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {assignments.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-6 py-12 text-center">
@@ -249,7 +258,7 @@ export default function Assignments({ token }: AssignmentsProps) {
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="label-app">Target Academic Staff</label>
+                  <label className="label-app">Teacher</label>
                   <select 
                     className="input-app" 
                     required
@@ -261,7 +270,7 @@ export default function Assignments({ token }: AssignmentsProps) {
                   </select>
                 </div>
                 <div>
-                  <label className="label-app">Assigned Subject & Course</label>
+                  <label className="label-app">Subject</label>
                   <select 
                     className="input-app" 
                     required

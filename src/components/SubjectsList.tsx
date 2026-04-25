@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Subject, User } from '../types.ts';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useToast } from './Toast';
 
 interface SubjectsListProps {
   token: string;
 }
 
 export default function SubjectsList({ token }: SubjectsListProps) {
+  const toast = useToast();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -22,13 +24,25 @@ export default function SubjectsList({ token }: SubjectsListProps) {
   }, []);
 
   const fetchData = async () => {
-    const sRes = await fetch('/api/subjects', { headers: { 'Authorization': `Bearer ${token}` } });
-    const aRes = await fetch('/api/assignments', { headers: { 'Authorization': `Bearer ${token}` } });
-    
-    const sData = await sRes.json();
-    // Be tolerant if API returns 0/1.
-    setSubjects((sData || []).map((s: any) => ({ ...s, has_practical: Boolean(s.has_practical) })));
-    setAssignments(await aRes.json());
+    try {
+      const sRes = await fetch('/api/subjects', { headers: { 'Authorization': `Bearer ${token}` } });
+      const aRes = await fetch('/api/assignments', { headers: { 'Authorization': `Bearer ${token}` } });
+
+      const sData = await sRes.json();
+      const aData = await aRes.json();
+
+      // Only set arrays – fall back to [] if the response isn't a real array
+      setSubjects(
+        Array.isArray(sData)
+          ? sData.map((s: any) => ({ ...s, has_practical: Boolean(s.has_practical) }))
+          : []
+      );
+      setAssignments(Array.isArray(aData) ? aData : []);
+    } catch (err) {
+      console.error('Failed to load subjects/assignments', err);
+      setSubjects([]);
+      setAssignments([]);
+    }
   };
 
   const openAdd = () => {
@@ -60,11 +74,12 @@ export default function SubjectsList({ token }: SubjectsListProps) {
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      alert(data?.error || 'Failed to save subject');
+      toast.showError(data?.error || 'Failed to save subject');
       return;
     }
 
     setShowModal(false);
+    toast.showSuccess('Subject saved successfully!');
     fetchData();
   };
 
@@ -76,9 +91,10 @@ export default function SubjectsList({ token }: SubjectsListProps) {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      alert(data?.error || 'Failed to delete subject');
+      toast.showError(data?.error || 'Failed to delete subject');
       return;
     }
+    toast.showSuccess('Subject deleted successfully!');
     fetchData();
   };
 
@@ -144,19 +160,25 @@ export default function SubjectsList({ token }: SubjectsListProps) {
         <div className="card-app overflow-hidden">
           <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-[10px] uppercase tracking-[0.2em] text-slate-500">Faculty Assignments</div>
           <div className="divide-y divide-slate-100">
-            {assignments.map(a => (
-              <div key={a.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                <div className="flex items-center space-x-4">
-                  <div className="w-9 h-9 bg-brand-dark text-white rounded flex items-center justify-center text-[10px] font-black uppercase">
-                    {a.teacher_name.charAt(0)}
-                  </div>
-                  <div>
-                    <p className="font-bold text-slate-800 uppercase tracking-tight text-sm italic">{a.teacher_name}</p>
-                    <p className="text-[9px] font-bold text-brand-primary uppercase tracking-widest">{a.subject_name} • {a.form}</p>
+            {assignments.map(a => {
+              const teacherName = a.users?.full_name || 'Unknown';
+              const subjectName = a.subjects?.name || 'Unknown';
+              const form = a.subjects?.form || '—';
+
+              return (
+                <div key={a.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-9 h-9 bg-brand-dark text-white rounded flex items-center justify-center text-[10px] font-black uppercase">
+                      {teacherName.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800 uppercase tracking-tight text-sm italic">{teacherName}</p>
+                      <p className="text-[9px] font-bold text-brand-primary uppercase tracking-widest">{subjectName} • {form}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {assignments.length === 0 && (
               <div className="p-8 text-center text-slate-300 font-bold text-[10px] uppercase tracking-widest">No active assignments found.</div>
             )}
@@ -180,7 +202,7 @@ export default function SubjectsList({ token }: SubjectsListProps) {
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="label-app">Subject Title</label>
+                  <label className="label-app">Name</label>
                   <input
                     type="text"
                     required
@@ -191,7 +213,7 @@ export default function SubjectsList({ token }: SubjectsListProps) {
                   />
                 </div>
                 <div>
-                  <label className="label-app">Course Code</label>
+                  <label className="label-app">Code</label>
                   <input
                     type="text"
                     required
@@ -202,7 +224,7 @@ export default function SubjectsList({ token }: SubjectsListProps) {
                   />
                 </div>
                 <div>
-                  <label className="label-app">Academic Level</label>
+                  <label className="label-app">Form</label>
                   <select
                     className="input-app"
                     value={subjectData.form}
@@ -218,7 +240,7 @@ export default function SubjectsList({ token }: SubjectsListProps) {
                     checked={subjectData.has_practical}
                     onChange={e => setSubjectData({ ...subjectData, has_practical: e.target.checked })}
                   />
-                  <span className="group-hover:text-brand-primary transition-colors">Laboratory Practical Component?</span>
+                  <span className="group-hover:text-brand-primary transition-colors">Has Practical</span>
                 </label>
               </div>
               <div className="p-4 bg-slate-50 flex justify-end space-x-2 border-t border-slate-200">

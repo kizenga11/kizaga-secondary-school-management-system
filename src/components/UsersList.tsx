@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types.ts';
 import { UserPlus, Search, Trash2, X, Pencil, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useToast } from './Toast';
 
 interface UsersListProps {
   token: string;
@@ -9,6 +10,8 @@ interface UsersListProps {
 }
 
 export default function UsersList({ token, userRole }: UsersListProps) {
+  const { showSuccess, showError } = useToast();
+  
   if (userRole !== 'headmaster') {
     return (
       <div className="card-app p-6">
@@ -92,11 +95,19 @@ export default function UsersList({ token, userRole }: UsersListProps) {
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      alert(data?.error || 'Failed to save staff');
+      const msg = data?.error || 'Failed to save staff';
+      // Check for duplicate or existing user message
+      if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('duplicate')) {
+        showError('User already exists, record updated');
+      } else {
+        showError(msg);
+      }
       return;
     }
 
+    const data = await res.json().catch(() => null);
     closeModal();
+    showSuccess(editingId ? 'Staff updated successfully!' : 'Staff registered successfully!');
     fetchUsers();
   };
 
@@ -229,7 +240,7 @@ export default function UsersList({ token, userRole }: UsersListProps) {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Barua Pepe</label>
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Email</label>
                   <input 
                     type="email" 
                     required 
@@ -267,7 +278,7 @@ export default function UsersList({ token, userRole }: UsersListProps) {
                   )}
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">No ya Simu</label>
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Phone</label>
                   <input 
                     type="tel" 
                     value={formData.phone}

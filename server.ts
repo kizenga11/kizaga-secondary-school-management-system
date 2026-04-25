@@ -63,6 +63,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS school_settings (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     school_name TEXT NOT NULL,
+    school_logo TEXT,
     academic_year TEXT NOT NULL,
     address TEXT,
     region TEXT,
@@ -188,8 +189,8 @@ CREATE TABLE IF NOT EXISTS exam_compositions (
 // Ensure settings row exists
 try {
   db.prepare(
-    `INSERT OR IGNORE INTO school_settings (id, school_name, academic_year, address, region, district)
-     VALUES (1, 'Kizaga Secondary School', '2026', NULL, NULL, NULL)`
+    `INSERT OR IGNORE INTO school_settings (id, school_name, school_logo, academic_year, address, region, district)
+     VALUES (1, 'Kizaga Secondary School', NULL, '2026', NULL, NULL, NULL)`
   ).run();
 } catch (e) {
   console.warn('School settings initialization skipped:', e);
@@ -271,6 +272,17 @@ try {
   console.warn('Students schema migration skipped:', e);
 }
 
+// Lightweight schema migration for school settings (logo)
+try {
+  const settingsCols = db.prepare("PRAGMA table_info(school_settings)").all() as any[];
+  const hasLogo = settingsCols.some(c => c.name === 'school_logo');
+  if (!hasLogo) {
+    db.exec("ALTER TABLE school_settings ADD COLUMN school_logo TEXT");
+  }
+} catch (e) {
+  console.warn('School settings logo migration skipped:', e);
+}
+
 // Insert default headmaster if none exists
 const headmaster = db.prepare("SELECT * FROM users WHERE role = 'headmaster'").get();
 if (!headmaster) {
@@ -334,6 +346,7 @@ async function startServer() {
       return res.json({
         school_name: 'Kizaga Secondary School',
         academic_year: '2026',
+        school_logo: '',
         address: '',
         region: '',
         district: '',
@@ -341,6 +354,7 @@ async function startServer() {
     }
     res.json({
       school_name: row.school_name,
+      school_logo: row.school_logo || '',
       academic_year: row.academic_year,
       address: row.address || '',
       region: row.region || '',
@@ -352,7 +366,7 @@ async function startServer() {
     const actor = (req as any).user;
     if (actor.role !== 'headmaster' && actor.role !== 'academic') return res.sendStatus(403);
 
-    const { school_name, academic_year, address, region, district } = req.body as any;
+    const { school_name, school_logo, academic_year, address, region, district } = req.body as any;
     if (!school_name || !academic_year) {
       return res.status(400).json({ error: 'school_name and academic_year are required' });
     }
@@ -365,16 +379,18 @@ async function startServer() {
 
     try {
       db.prepare(
-        `INSERT INTO school_settings (id, school_name, academic_year, address, region, district)
-         VALUES (1, ?, ?, ?, ?, ?)
+        `INSERT INTO school_settings (id, school_name, school_logo, academic_year, address, region, district)
+         VALUES (1, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            school_name = excluded.school_name,
+           school_logo = excluded.school_logo,
            academic_year = excluded.academic_year,
            address = excluded.address,
            region = excluded.region,
            district = excluded.district`
       ).run(
         String(school_name).trim(),
+        normText(school_logo),
         String(academic_year).trim(),
         normText(address),
         normText(region),
@@ -779,14 +795,17 @@ async function startServer() {
     if (streams.length === 0) return res.json([]);
 
     const ids = streams.map(s => s.id);
-    const placeholders = ids.map(() => '?').join(',');
-    const links = db.prepare(`SELECT stream_id, subject_id FROM stream_subjects WHERE stream_id IN (${placeholders})`).all(...ids) as any[];
 
     const map = new Map<number, number[]>();
     for (const s of streams) map.set(s.id, []);
-    for (const l of links) {
-      const arr = map.get(l.stream_id);
-      if (arr) arr.push(l.subject_id);
+
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(',');
+      const links = db.prepare(`SELECT stream_id, subject_id FROM stream_subjects WHERE stream_id IN (${placeholders})`).all(...ids) as any[];
+      for (const l of links) {
+        const arr = map.get(l.stream_id);
+        if (arr) arr.push(l.subject_id);
+      }
     }
 
     res.json(streams.map(s => ({ ...s, subject_ids: map.get(s.id) || [] })));

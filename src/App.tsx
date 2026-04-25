@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { User, UserRole } from './types.ts';
 import { supabase } from './lib/supabase';
+import { ToastProvider } from './components/Toast';
 
 // Components
 import Login from './components/Login.tsx';
@@ -199,6 +200,7 @@ export default function App() {
   })();
 
   return (
+    <ToastProvider>
     <div className="min-h-screen bg-brand-bg flex flex-col md:flex-row">
       {/* Mobile Header */}
       <div className="md:hidden bg-brand-sidebar text-white px-4 py-3 flex justify-between items-center sticky top-0 z-50">
@@ -289,5 +291,6 @@ export default function App() {
         </div>
       </main>
     </div>
+    </ToastProvider>
   );
 }

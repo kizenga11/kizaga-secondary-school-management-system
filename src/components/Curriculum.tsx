@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Topic, Subject } from '../types.ts';
 import { Plus, CheckCircle2, Clock, AlertCircle, Bookmark, Target, Layers, X, ClipboardList } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useToast } from './Toast';
 
 interface CurriculumProps {
   token: string;
@@ -29,6 +30,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
   const [testSaving, setTestSaving] = useState(false);
   const [testLoading, setTestLoading] = useState(false);
   const [topicTestCounts, setTopicTestCounts] = useState<Record<number, { total: number; entered: number; passed: number; failed: number }>>({});
+  const { showSuccess, showError } = useToast();
 
   useEffect(() => {
     fetchInitialData();
@@ -49,15 +51,19 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
     
     const sData = await sRes.json();
     const aData = await aRes.json();
-    
-    setSubjects(sData);
-    setAssignments(aData);
 
-    const forms = Array.from(new Set((sData || []).map((s: any) => s.form))).filter(Boolean);
+    // ensure arrays
+    const safeSubjects = Array.isArray(sData) ? sData : [];
+    const safeAssignments = Array.isArray(aData) ? aData : [];
+
+    setSubjects(safeSubjects);
+    setAssignments(safeAssignments);
+
+    const forms = Array.from(new Set(safeSubjects.map((s: any) => s.form))).filter(Boolean);
     const initialForm = forms[0] || 'Form 1';
     setSelectedForm(initialForm);
 
-    const initialSubject = (sData || []).find((s: any) => s.form === initialForm) || (sData || [])[0];
+    const initialSubject = safeSubjects.find((s: any) => s.form === initialForm) || safeSubjects[0];
     if (initialSubject) setSelectedSubject(initialSubject.id);
   };
 
@@ -65,34 +71,45 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
     const res = await fetch(`/api/curriculum/overview?form=${encodeURIComponent(selectedForm)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    setOverview(await res.json());
+    const data = await res.json();
+    setOverview(Array.isArray(data) ? data : []);
   };
 
   const fetchTopics = async () => {
-    const res = await fetch(`/api/topics?subject_id=${selectedSubject}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const topicsData = await res.json();
-    setTopics(topicsData);
-
-    // Bulk fetch test counts for all topics of this subject
-    const ids = (topicsData || []).map((t: any) => t.id).filter(Boolean);
-    if (ids.length === 0) return;
-
     try {
-      const countsRes = await fetch(`/api/topics/test-counts?ids=${ids.join(',')}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(`/api/topics?subject_id=${selectedSubject}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (countsRes.ok) {
-        const counts = await countsRes.json();
-        const map: Record<number, { total: number; entered: number; passed: number; failed: number }> = {};
-        for (const c of counts) {
-          map[c.topic_id] = c;
-        }
-        setTopicTestCounts(map);
+      if (!res.ok) {
+        console.error('Failed to fetch topics', res.status);
+        setTopics([]);
+        return;
       }
-    } catch {
-      // ignore
+      const topicsData = await res.json();
+      const safeTopics = Array.isArray(topicsData) ? topicsData : [];
+      setTopics(safeTopics);
+
+      const ids = safeTopics.map((t: any) => t.id).filter(Boolean);
+      if (ids.length === 0) return;
+
+      try {
+        const countsRes = await fetch(`/api/topics/test-counts?ids=${ids.join(',')}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (countsRes.ok) {
+          const counts = await countsRes.json();
+          const map: Record<number, { total: number; entered: number; passed: number; failed: number }> = {};
+          for (const c of counts) {
+            map[c.topic_id] = c;
+          }
+          setTopicTestCounts(map);
+        }
+      } catch {
+        // ignore
+      }
+    } catch (err) {
+      console.error(err);
+      setTopics([]);
     }
   };
 
@@ -100,13 +117,27 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
 
   const handleAddTopic = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch('/api/topics', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...topicData, subject_id: selectedSubject })
-    });
-    setShowModal(false);
-    fetchTopics();
+    if (!selectedSubject) return;
+    try {
+      const payload = { ...topicData, subject_id: selectedSubject };
+      console.log('Sending payload:', payload);
+      const res = await fetch('/api/topics', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        console.error('Server error:', errData);
+        showError(errData?.error || 'Failed to add topic');
+        return;
+      }
+      setShowModal(false);
+      setTopicData({ name: '', competence: '', specific_competence: '', deadline: '' });
+      fetchTopics();
+    } catch (err) {
+      console.error('Network error:', err);
+    }
   };
 
   const updateStatus = async (id: number, status: string) => {
@@ -182,7 +213,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
         body: JSON.stringify({ results: payload }),
       });
 
-      alert('Test results saved successfully.');
+      showSuccess('Test results saved successfully.');
       setShowTestModal(false);
       fetchTopics();
       fetchOverview();
@@ -331,7 +362,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
               <div className="flex-1">
                 <div className="flex items-center space-x-3 mb-4">
                   <span className="text-[10px] font-black text-brand-primary font-mono tracking-widest px-2 py-0.5 bg-brand-primary/10 rounded">
-                    TOPIC_0{i + 1}
+                    TOPIC_{i + 1}
                   </span>
                   <h3 className="text-lg font-bold text-slate-800 tracking-tight">{t.name}</h3>
                   <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter ${
@@ -379,7 +410,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
                         <p className="text-lg font-black text-slate-700">{total}</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Tested</p>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-brand-primary">Tested</p>
                         <p className="text-lg font-black text-brand-primary">{entered}</p>
                       </div>
                       <div className="text-center">
@@ -425,7 +456,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
                       t.status === 'completed' ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-Mark Complete
+                    Mark Complete
                   </button>
                   <button
                     onClick={() => openTestModal(t)}

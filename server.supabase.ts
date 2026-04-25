@@ -135,22 +135,108 @@ app.post('/api/users', authenticateToken, async (req, res) => {
   }
   
   try {
-    const { full_name, tsc_no, email, password, phone, role } = req.body;
+    const { full_name, tsc_no, email, phone, role, user_id } = req.body;
     
-    // Create auth user
-    const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
-    if (authError) return res.status(400).json({ error: authError.message });
+    // Check if user already exists in public.users table
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id, email')
+      .eq('email', email)
+      .single();
     
-    // Create local user record
+    if (existingUser) {
+      // Update existing user instead of creating new
+      const { data, error } = await supabase
+        .from('users')
+        .update({
+          full_name,
+          tsc_no,
+          phone,
+          role: role || 'teacher'
+        })
+        .eq('id', existingUser.id)
+        .select()
+        .single();
+      
+      if (error) return res.status(400).json({ error: error.message });
+      return res.status(200).json({ message: 'User already exists, record updated', user: data });
+    }
+    
+    // Check if auth user already exists
+    if (user_id) {
+      // Link existing auth user to public.users
+      const { data, error } = await supabase
+        .from('users')
+        .insert({
+          user_id,
+          full_name,
+          tsc_no,
+          email,
+          phone,
+          role: role || 'teacher'
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        // If linking fails due to other constraint, try update
+        if (error.message.includes('duplicate')) {
+          const { data: updated, error: updateError } = await supabase
+            .from('users')
+            .update({ full_name, tsc_no, phone, role: role || 'teacher' })
+            .eq('user_id', user_id)
+            .select()
+            .single();
+          
+          if (updateError) return res.status(400).json({ error: updateError.message });
+          return res.status(200).json({ message: 'User already exists, record updated', user: updated });
+        }
+        return res.status(400).json({ error: error.message });
+      }
+      return res.status(201).json({ message: 'User created', user: data });
+    }
+    
+    // Try to create new auth user first
+    const tempPassword = Math.random().toString(36).slice(-8) + 'A1!';
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email,
+      password: tempPassword,
+    });
+    
+    if (authError) {
+      // If auth signup fails (user exists), try to update existing
+      if (authError.message.includes('already been registered') || authError.message.includes('already exists')) {
+        const { data: foundUser } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', email)
+          .single();
+        
+        if (foundUser) {
+          const { data: updated, error: updateError } = await supabase
+            .from('users')
+            .update({ full_name, tsc_no, phone, role: role || 'teacher' })
+            .eq('id', foundUser.id)
+            .select()
+            .single();
+          
+          if (updateError) return res.status(400).json({ error: updateError.message });
+          return res.status(200).json({ message: 'User already exists, record updated', user: updated });
+        }
+      }
+      return res.status(400).json({ error: authError.message });
+    }
+    
+    // Create local user record with auth user_id
     const { data, error } = await supabase
       .from('users')
-      .insert({ 
-        user_id: authData.user?.id, 
-        full_name, 
-        tsc_no, 
-        email, 
-        phone, 
-        role: role || 'teacher' 
+      .insert({
+        user_id: authData.user?.id,
+        full_name,
+        tsc_no,
+        email,
+        phone,
+        role: role || 'teacher'
       })
       .select()
       .single();
@@ -183,9 +269,29 @@ app.post('/api/students', authenticateToken, async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
   
+  const { full_name, gender, form, parent_phone, stream_id } = req.body as any;
+  
+  let streamId: number | null = null;
+  if (stream_id !== undefined && stream_id !== null && String(stream_id).trim() !== '') {
+    const n = Number(stream_id);
+    if (!Number.isFinite(n)) return res.status(400).json({ error: 'Invalid stream_id' });
+    streamId = n;
+  }
+
+  if (streamId !== null) {
+    const { data: stream } = await supabase
+      .from('streams')
+      .select('id, form')
+      .eq('id', streamId)
+      .single();
+    
+    if (!stream) return res.status(400).json({ error: 'Stream not found' });
+    if (stream.form !== form) return res.status(400).json({ error: 'Stream form must match student form' });
+  }
+  
   const { data, error } = await supabase
     .from('students')
-    .insert(req.body)
+    .insert({ full_name, gender, form, parent_phone, stream_id: streamId })
     .select()
     .single();
   
@@ -198,10 +304,51 @@ app.put('/api/students/:id', authenticateToken, async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
   
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid student id' });
+
+  const { full_name, gender, form, parent_phone, stream_id } = req.body as any;
+  const hasStreamInBody = Object.prototype.hasOwnProperty.call(req.body || {}, 'stream_id');
+  const rawStreamId = (req.body || {})?.stream_id;
+
+  const { data: current } = await supabase
+    .from('students')
+    .select('id, form, stream_id')
+    .eq('id', id)
+    .single();
+
+  if (!current) return res.status(404).json({ error: 'Student not found' });
+
+  let nextStreamId: number | null = current.stream_id ?? null;
+
+  if (hasStreamInBody) {
+    if (rawStreamId === null || rawStreamId === undefined || String(rawStreamId).trim() === '') {
+      nextStreamId = null;
+    } else {
+      const n = Number(rawStreamId);
+      if (!Number.isFinite(n)) return res.status(400).json({ error: 'Invalid stream_id' });
+      nextStreamId = n;
+    }
+  } else {
+    // If the form changes and stream isn't explicitly sent, clear it to avoid mismatches.
+    if (form !== current.form) nextStreamId = null;
+  }
+
+  if (nextStreamId !== null) {
+    const { data: stream } = await supabase
+      .from('streams')
+      .select('id, form')
+      .eq('id', nextStreamId)
+      .single();
+    
+    if (!stream) return res.status(400).json({ error: 'Stream not found' });
+    if (stream.form !== form) return res.status(400).json({ error: 'Stream form must match student form' });
+  }
+
   const { data, error } = await supabase
     .from('students')
-    .update(req.body)
-    .eq('id', req.params.id)
+    .update({ full_name, gender, form, parent_phone, stream_id: nextStreamId })
+    .eq('id', id)
     .select()
     .single();
   
@@ -365,14 +512,51 @@ app.get('/api/streams', authenticateToken, async (req, res) => {
   if (req.userRole !== 'headmaster' && req.userRole !== 'academic') {
     return res.status(403).json({ error: 'Access denied' });
   }
-  
-  const { form } = req.query;
-  let query = supabase.from('streams').select('*, stream_subjects(subject_id)');
-  if (form) query = query.eq('form', form);
-  
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+
+  try {
+    const { form } = req.query;
+    console.log('GET /api/streams - form query:', form);
+    
+    let query = supabase.from('streams').select('*').order('form').order('name');
+    if (form) query = query.eq('form', form);
+    
+    const { data: streams, error } = await query;
+
+    console.log('GET /api/streams - data returned:', streams);
+    console.log('GET /api/streams - error:', error);
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json([]);
+    }
+
+    if (!streams || streams.length === 0) return res.json([]);
+
+    // Get subject_ids for each stream
+    const streamIds = streams.map((s: any) => s.id);
+    const { data: streamSubjects } = await supabase
+      .from('stream_subjects')
+      .select('stream_id, subject_id')
+      .in('stream_id', streamIds);
+
+    const subjectMap = new Map<number, number[]>();
+    for (const s of streams) subjectMap.set(s.id, []);
+    
+    for (const ss of streamSubjects || []) {
+      const arr = subjectMap.get(ss.stream_id);
+      if (arr) arr.push(ss.subject_id);
+    }
+
+    const result = streams.map((s: any) => ({
+      ...s,
+      subject_ids: subjectMap.get(s.id) || []
+    }));
+
+    return res.json(Array.isArray(result) ? result : []);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json([]);
+  }
 });
 
 app.post('/api/streams', authenticateToken, async (req, res) => {
@@ -445,7 +629,110 @@ app.get('/api/topics', authenticateToken, async (req, res) => {
   
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data?.map((t: any) => ({ ...t, tested: t.tested || false })) || []);
+  res.json(Array.isArray(data) ? data.map((t: any) => ({ ...t, tested: t.tested || false })) : []);
+});
+
+app.get('/api/topics/test-counts', authenticateToken, async (req, res) => {
+  const { ids } = req.query;
+  if (!ids) return res.json([]);
+  
+  const idArray = String(ids).split(',').map(Number).filter(n => Number.isFinite(n));
+  if (idArray.length === 0) return res.json([]);
+  
+  const { data, error } = await supabase
+    .from('topic_test_results')
+    .select('topic_id, student_id, score, absent')
+    .in('topic_id', idArray);
+  
+  if (error) return res.status(500).json({ error: error.message });
+  
+  const counts: Record<number, { total: number; entered: number; passed: number; failed: number }> = {};
+  
+  for (const id of idArray) {
+    counts[id] = { total: 0, entered: 0, passed: 0, failed: 0 };
+  }
+  
+  // Count total students per topic (need to get students assigned to subjects)
+  // For now, count based on test results
+  const topicStudentMap = new Map<number, Set<number>>();
+  for (const r of (data || []) as any[]) {
+    if (!topicStudentMap.has(r.topic_id)) topicStudentMap.set(r.topic_id, new Set());
+    topicStudentMap.get(r.topic_id)!.add(r.student_id);
+  }
+  
+  for (const r of data || []) {
+    const c = counts[r.topic_id];
+    if (c) {
+      c.total = topicStudentMap.get(r.topic_id)?.size || 0;
+      if (!r.absent) {
+        c.entered++;
+        if (r.score >= 50) c.passed++;
+        else c.failed++;
+      }
+    }
+  }
+  
+  const result = Object.entries(counts).map(([topic_id, c]) => ({
+    topic_id: Number(topic_id),
+    ...c
+  }));
+  
+  res.json(result);
+});
+
+app.get('/api/topics/:id/students', authenticateToken, async (req, res) => {
+  const { data: topic } = await supabase
+    .from('topics')
+    .select('subject_id')
+    .eq('id', req.params.id)
+    .single();
+  
+  if (!topic) return res.status(404).json({ error: 'Topic not found' });
+  
+  const { data: subject } = await supabase
+    .from('subjects')
+    .select('form')
+    .eq('id', topic.subject_id)
+    .single();
+  
+  if (!subject) return res.status(404).json({ error: 'Subject not found' });
+  
+  const { data, error } = await supabase
+    .from('students')
+    .select('id, full_name')
+    .eq('form', subject.form)
+    .neq('form', 'Graduated')
+    .order('full_name');
+  
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(Array.isArray(data) ? data : []);
+});
+
+app.get('/api/topics/:id/test-results', authenticateToken, async (req, res) => {
+  const { data, error } = await supabase
+    .from('topic_test_results')
+    .select('student_id, score, absent')
+    .eq('topic_id', req.params.id);
+  
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ results: data || [] });
+});
+
+app.post('/api/topics/:id/test-results', authenticateToken, async (req, res) => {
+  const { results } = req.body;
+  const topicId = req.params.id;
+  
+  const inserts = (results || []).map((r: any) => ({
+    topic_id: topicId,
+    student_id: r.student_id,
+    score: r.absent ? null : (r.score === '' ? null : parseFloat(r.score)),
+    absent: r.absent
+  }));
+  
+  const { error } = await supabase.from('topic_test_results').upsert(inserts);
+  if (error) return res.status(400).json({ error: error.message });
+  
+  res.json({ message: 'Test results saved' });
 });
 
 app.post('/api/topics', authenticateToken, async (req, res) => {
