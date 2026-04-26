@@ -1,9 +1,12 @@
 {
-    "version": 2,
-    "routes": [
-        {
-            "src": "/api/(.*)",
-            "dest": "server.supabase.ts"
-        }
-    ]
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }
