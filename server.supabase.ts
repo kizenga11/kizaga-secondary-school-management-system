@@ -41,26 +41,33 @@ app.use(express.json());
 
 // ========== MIDDLEWARE ==========
 const authenticateToken = async (req: any, res: any, next: any) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token provided' });
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'No token provided' });
 
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return res.status(403).json({ error: 'Invalid token' });
-  
-  // Get local user ID from public.users table
-  const { data: localUser } = await supabase
-    .from('users')
-    .select('id, full_name, role')
-    .eq('user_id', user.id)
-    .single();
-  
-  if (!localUser) return res.status(403).json({ error: 'User not found in system' });
-  
-  req.user = localUser;
-  req.userId = localUser.id;
-  req.userRole = localUser.role;
-  next();
+    if (!supabase) return res.status(500).json({ error: 'Database connection not configured. Check Environment Variables.' });
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return res.status(403).json({ error: 'Invalid token' });
+    
+    // Get local user ID from public.users table
+    const { data: localUser } = await supabase
+      .from('users')
+      .select('id, full_name, role')
+      .eq('user_id', user.id)
+      .single();
+    
+    if (!localUser) return res.status(403).json({ error: 'User not found in system' });
+    
+    req.user = localUser;
+    req.userId = localUser.id;
+    req.userRole = localUser.role;
+    next();
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    res.status(500).json({ error: 'Internal Server Error during authentication' });
+  }
 };
 
 // ========== HELPER FUNCTIONS ==========
@@ -1288,9 +1295,11 @@ app.use('/api', (req, res) => {
 });
 
 // ========== START SERVER ==========
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log('Supabase:', supabaseUrl ? 'Configured' : 'Not configured');
-});
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log('Supabase:', supabaseUrl ? 'Configured' : 'Not configured');
+  });
+}
 
 export default app;
