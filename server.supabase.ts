@@ -135,14 +135,21 @@ app.post('/api/users', authenticateToken, async (req, res) => {
   }
   
   try {
-    const { full_name, tsc_no, email, phone, role, user_id } = req.body;
+    const {
+ full_name,
+ tsc_no,
+ email,
+ phone,
+ role,
+ user_id
+} = req.body;
     
     // Check if user already exists in public.users table
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id, email')
-      .eq('email', email)
-      .single();
+    const { data: existingUser, error: existingErr } = await supabase
+.from('users')
+.select('id,email')
+.eq('email', email)
+.maybeSingle();
     
     if (existingUser) {
       // Update existing user instead of creating new
@@ -1065,6 +1072,46 @@ app.get('/api/exams/:id/division-summary', authenticateToken, async (req, res) =
     summary,
     totals: { total, passCount, passRate: total > 0 ? Math.round((passCount / total) * 100) : 0 }
   });
+});
+
+app.get('/api/settings/school', authenticateToken, async (req,res)=>{
+ try{
+   const { data, error } = await supabase
+     .from('school_settings')
+     .select('*')
+     .eq('id',1)
+     .single();
+
+   if(error) return res.status(400).json({error:error.message});
+
+   res.json(data);
+
+ } catch(e){
+   res.status(500).json({error:e.message});
+ }
+});
+
+app.put('/api/settings/school', authenticateToken, async (req,res)=>{
+ try{
+   const { school_name, academic_year } = req.body;
+
+   const { data, error } = await supabase
+     .from('school_settings')
+     .upsert({
+       id:1,
+       school_name,
+       academic_year
+     })
+     .select()
+     .single();
+
+   if(error) return res.status(400).json({error:error.message});
+
+   res.json(data);
+
+ } catch(e){
+   res.status(500).json({error:e.message});
+ }
 });
 
 // ========== REPORTS ==========
