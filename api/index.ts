@@ -1,3 +1,3 @@
-import app from '../server.supabase.ts';
+import app from '../server.supabase';
 
 export default app;
