@@ -1273,6 +1273,11 @@ app.get('/api/curriculum/overview', authenticateToken, async (req, res) => {
   res.json(rows);
 });
 
+// ========== GLOBAL 404 HANDLER FOR API ROUTES ==========
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 // ========== START SERVER ==========
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://localhost:${PORT}`);

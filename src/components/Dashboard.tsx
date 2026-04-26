@@ -57,21 +57,34 @@ export default function Dashboard({ user, setView }: DashboardProps) {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // Fetch all needed data in parallel
-      const [studentsRes, subjectsRes, usersRes, curriculumRes, examsRes] = await Promise.all([
-        fetch('/api/students', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/subjects', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/users', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/curriculum/overview', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/exams', { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
+      // Helper for safe JSON fetching
+      const fetchJson = async (url: string) => {
+        try {
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+          if (!res.ok) {
+            console.warn(`HTTP ${res.status} from ${url}`);
+            return null;
+          }
+          const text = await res.text();
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            console.error('Response was not JSON:', text.slice(0, 200));
+            return null;
+          }
+        } catch (error) {
+          console.error(`Fetch error for ${url}:`, error);
+          return null;
+        }
+      };
 
+      // Fetch all needed data in parallel safely
       const [students, subjects, users, curriculum, exams] = await Promise.all([
-        studentsRes.json(),
-        subjectsRes.json(),
-        usersRes.json(),
-        curriculumRes.json(),
-        examsRes.json(),
+        fetchJson('/api/students'),
+        fetchJson('/api/subjects'),
+        fetchJson('/api/users'),
+        fetchJson('/api/curriculum/overview'),
+        fetchJson('/api/exams'),
       ]);
 
       // Process curriculum for overview
