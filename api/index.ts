@@ -784,7 +784,7 @@ app.patch('/api/topics/:id', authenticateToken, async (req, res) => {
 // ========== EXAMS ==========
 app.get('/api/exams', authenticateToken, async (req, res) => {
   const { form, academic_year, type } = req.query;
-  let query = supabase.from('exams').select('*').order('created_at', { ascending: false });
+  let query = supabase.from('exams').select('*');
   
   if (form) query = query.eq('form', form);
   if (academic_year) query = query.eq('academic_year', academic_year);
