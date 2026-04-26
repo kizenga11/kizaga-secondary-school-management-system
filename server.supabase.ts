@@ -6,8 +6,17 @@ import dotenv from 'dotenv';
 // Load .env file
 dotenv.config();
 
+declare global {
+  namespace Express {
+    interface Request {
+      userId?: string;
+      userRole?: string;
+    }
+  }
+}
+
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Supabase client (server-side with service role)
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
