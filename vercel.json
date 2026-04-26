@@ -6,6 +6,9 @@
             "dest": "server.supabase.ts"
         },
         {
+            "handle": "filesystem"
+        },
+        {
             "src": "/(.*)",
             "dest": "/index.html"
         }
