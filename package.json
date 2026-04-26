@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.supabase.ts",
+    "dev": "tsx api/index.ts",
     "dev:sqlite": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
