@@ -11,9 +11,12 @@ interface CurriculumProps {
 }
 
 export default function Curriculum({ token, userRole, userId }: CurriculumProps) {
+  const isAdmin = userRole === 'headmaster' || userRole === 'academic';
   const [topics, setTopics] = useState<Topic[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [streams, setStreams] = useState<any[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<number | null>(null);
   const [selectedForm, setSelectedForm] = useState<string>('');
   const [overview, setOverview] = useState<any[]>([]);
@@ -30,6 +33,17 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
   const [testSaving, setTestSaving] = useState(false);
   const [testLoading, setTestLoading] = useState(false);
   const [topicTestCounts, setTopicTestCounts] = useState<Record<number, { total: number; entered: number; passed: number; failed: number }>>({});
+  const [adminTeacherFilter, setAdminTeacherFilter] = useState<string>('all');
+  const [adminSubjectFilter, setAdminSubjectFilter] = useState<string>('all');
+  const [adminClassFilter, setAdminClassFilter] = useState<string>('All');
+  const [adminStreamFilter, setAdminStreamFilter] = useState<string>('all');
+  const [adminDashboard, setAdminDashboard] = useState<any>({
+    summary: { total_topics: 0, completed_topics: 0, on_progress_topics: 0, tested_topics: 0, coverage_percent: 0, overdue_topics: 0 },
+    teacher_summary: [],
+    rows: [],
+    missing_topic_subjects: [],
+    teachers_missing_topic_setup: [],
+  });
   const { showSuccess, showError } = useToast();
 
   useEffect(() => {
@@ -45,9 +59,18 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
     fetchOverview();
   }, [selectedForm]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchAdminDashboard();
+  }, [isAdmin, adminTeacherFilter, adminSubjectFilter, adminClassFilter, adminStreamFilter]);
+
   const fetchInitialData = async () => {
     const sRes = await fetch('/api/subjects', { headers: { 'Authorization': `Bearer ${token}` } });
     const aRes = await fetch('/api/assignments', { headers: { 'Authorization': `Bearer ${token}` } });
+    const uRes = isAdmin ? await fetch('/api/users', { headers: { 'Authorization': `Bearer ${token}` } }) : null;
+    const stRes = isAdmin
+      ? await fetch('/api/streams', { headers: { 'Authorization': `Bearer ${token}` } })
+      : null;
     
     const sData = await sRes.json();
     const aData = await aRes.json();
@@ -58,12 +81,25 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
 
     setSubjects(safeSubjects);
     setAssignments(safeAssignments);
+    if (isAdmin) {
+      const uData = await uRes?.json().catch(() => []);
+      const stData = await stRes?.json().catch(() => []);
+      setTeachers(Array.isArray(uData) ? uData.filter((u: any) => u.role === 'teacher') : []);
+      setStreams(Array.isArray(stData) ? stData : []);
+    }
 
-    const forms = Array.from(new Set(safeSubjects.map((s: any) => s.form))).filter(Boolean);
+    const teacherAssignedSubjectIds = new Set(
+      safeAssignments
+        .filter((a: any) => Number(a.teacher_id) === Number(userId))
+        .map((a: any) => Number(a.subject_id))
+    );
+    const subjectPool = userRole === 'teacher'
+      ? safeSubjects.filter((s: any) => teacherAssignedSubjectIds.has(Number(s.id)))
+      : safeSubjects;
+    const forms = Array.from(new Set(subjectPool.map((s: any) => s.form))).filter(Boolean);
     const initialForm = forms[0] || 'Form 1';
     setSelectedForm(initialForm);
-
-    const initialSubject = safeSubjects.find((s: any) => s.form === initialForm) || safeSubjects[0];
+    const initialSubject = subjectPool.find((s: any) => s.form === initialForm) || subjectPool[0];
     if (initialSubject) setSelectedSubject(initialSubject.id);
   };
 
@@ -73,6 +109,31 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
     });
     const data = await res.json();
     setOverview(Array.isArray(data) ? data : []);
+  };
+
+  const fetchAdminDashboard = async () => {
+    const params = new URLSearchParams();
+    if (adminTeacherFilter !== 'all') params.set('teacher_id', adminTeacherFilter);
+    if (adminSubjectFilter !== 'all') params.set('subject_id', adminSubjectFilter);
+    if (adminClassFilter !== 'All') params.set('form', adminClassFilter);
+    if (adminStreamFilter !== 'all') params.set('stream_id', adminStreamFilter);
+    const q = params.toString();
+
+    const res = await fetch(`/api/curriculum/admin-dashboard${q ? `?${q}` : ''}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      showError(data?.error || 'Failed to load curriculum dashboard');
+      return;
+    }
+    setAdminDashboard(data || {
+      summary: { total_topics: 0, completed_topics: 0, on_progress_topics: 0, tested_topics: 0, coverage_percent: 0, overdue_topics: 0 },
+      teacher_summary: [],
+      rows: [],
+      missing_topic_subjects: [],
+      teachers_missing_topic_setup: [],
+    });
   };
 
   const fetchTopics = async () => {
@@ -113,7 +174,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
     }
   };
 
-  const canManageTopics = userRole !== 'teacher' || assignments.some(a => a.subject_id === selectedSubject && a.teacher_id === userId);
+  const canManageTopics = userRole === 'teacher' && assignments.some(a => a.subject_id === selectedSubject && a.teacher_id === userId);
 
   const handleAddTopic = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,6 +258,16 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
 
   const saveTestResults = async () => {
     if (!testTopic) return;
+
+    for (const [studentId, entry] of Object.entries(testResults)) {
+      if (entry.absent || entry.score === '') continue;
+      const n = Number(entry.score);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        showError(`Invalid score for student #${studentId}. Score must be between 0 and 100.`);
+        return;
+      }
+    }
+
     setTestSaving(true);
     try {
       type TestEntry = { score: string; absent: boolean };
@@ -222,7 +293,35 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
     }
   };
 
-  const subjectsForForm = subjects.filter(s => s.form === selectedForm);
+  const subjectsForForm = subjects.filter(s => {
+    if (s.form !== selectedForm) return false;
+    if (userRole !== 'teacher') return true;
+    return assignments.some(a => a.subject_id === s.id && a.teacher_id === userId);
+  });
+  const teacherAssignedSubjects = useMemo(
+    () => subjects.filter(s => assignments.some(a => a.subject_id === s.id && a.teacher_id === userId)),
+    [subjects, assignments, userId]
+  );
+  const teacherHasAssignments = userRole !== 'teacher' || teacherAssignedSubjects.length > 0;
+  const teacherOverviewRows = userRole === 'teacher'
+    ? overview.filter((r: any) => teacherAssignedSubjects.some(s => s.id === r.id))
+    : overview;
+  const teacherSummary = useMemo(() => {
+    const agg = teacherOverviewRows.reduce(
+      (acc: any, r: any) => {
+        acc.total += Number(r.total_topics || 0);
+        acc.completed += Number(r.completed_topics || 0);
+        acc.pending += Number(r.pending_topics || 0);
+        acc.tested += Number(r.tested_topics || 0);
+        acc.overdue += Number(r.overdue_topics || 0);
+        return acc;
+      },
+      { total: 0, completed: 0, pending: 0, tested: 0, overdue: 0, coverage: 0 }
+    );
+    agg.coverage = agg.total > 0 ? Math.round((agg.completed / agg.total) * 100) : 0;
+    return agg;
+  }, [teacherOverviewRows]);
+
   const filteredTopics = topics.filter((t: any) => {
     if (topicFilter === 'all') return true;
     if (topicFilter === 'tested') return Boolean(t.tested);
@@ -244,12 +343,16 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
             onChange={(e) => {
               const nextForm = e.target.value;
               setSelectedForm(nextForm);
-              const nextSubject = subjects.find(s => s.form === nextForm);
+              const nextSubject = subjects.find(
+                s =>
+                  s.form === nextForm &&
+                  (userRole !== 'teacher' || assignments.some(a => a.subject_id === s.id && a.teacher_id === userId))
+              );
               setSelectedSubject(nextSubject ? nextSubject.id : null);
               setTopics([]);
             }}
           >
-            {Array.from(new Set(subjects.map(s => s.form))).map(f => (
+            {Array.from(new Set((userRole === 'teacher' ? teacherAssignedSubjects : subjects).map(s => s.form))).map(f => (
               <option key={f} value={f}>{f}</option>
             ))}
           </select>
@@ -272,6 +375,136 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
         </div>
       </header>
 
+      {userRole === 'teacher' && !teacherHasAssignments && (
+        <div className="card-app p-8 text-center">
+          <p className="text-sm font-black text-slate-700">No subjects assigned to you.</p>
+        </div>
+      )}
+
+      {userRole === 'teacher' && teacherHasAssignments && (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">My Total Topics</p><p className="text-xl font-black text-slate-800">{teacherSummary.total}</p></div>
+          <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">My Completed Topics</p><p className="text-xl font-black text-emerald-600">{teacherSummary.completed}</p></div>
+          <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">My Pending Topics</p><p className="text-xl font-black text-slate-700">{teacherSummary.pending}</p></div>
+          <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">My Tested Topics</p><p className="text-xl font-black text-amber-600">{teacherSummary.tested}</p></div>
+          <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">My Coverage %</p><p className="text-xl font-black text-brand-primary">{teacherSummary.coverage}%</p></div>
+          <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">My Overdue Topics</p><p className="text-xl font-black text-rose-600">{teacherSummary.overdue}</p></div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="card-app p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            <select className="input-app" value={adminTeacherFilter} onChange={e => setAdminTeacherFilter(e.target.value)}>
+              <option value="all">All Teachers</option>
+              {teachers.map((t: any) => <option key={t.id} value={String(t.id)}>{t.full_name}</option>)}
+            </select>
+            <select className="input-app" value={adminSubjectFilter} onChange={e => setAdminSubjectFilter(e.target.value)}>
+              <option value="all">All Subjects</option>
+              {subjects.map(s => <option key={s.id} value={String(s.id)}>{s.name} ({s.form})</option>)}
+            </select>
+            <select className="input-app" value={adminClassFilter} onChange={e => setAdminClassFilter(e.target.value)}>
+              <option value="All">All Classes</option>
+              {Array.from(new Set(subjects.map(s => s.form))).map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+            <select className="input-app" value={adminStreamFilter} onChange={e => setAdminStreamFilter(e.target.value)}>
+              <option value="all">All Streams</option>
+              {streams
+                .filter((st: any) => adminClassFilter === 'All' || st.form === adminClassFilter)
+                .map((st: any) => <option key={st.id} value={String(st.id)}>{st.form} {st.name}</option>)}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total</p><p className="text-xl font-black text-slate-800">{adminDashboard.summary.total_topics}</p></div>
+            <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Completed</p><p className="text-xl font-black text-emerald-600">{adminDashboard.summary.completed_topics}</p></div>
+            <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">In Progress</p><p className="text-xl font-black text-brand-primary">{adminDashboard.summary.on_progress_topics}</p></div>
+            <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tested</p><p className="text-xl font-black text-amber-600">{adminDashboard.summary.tested_topics}</p></div>
+            <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Coverage</p><p className="text-xl font-black text-slate-800">{adminDashboard.summary.coverage_percent}%</p></div>
+            <div className="rounded-lg border border-slate-200 p-3"><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Overdue</p><p className="text-xl font-black text-rose-600">{adminDashboard.summary.overdue_topics}</p></div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-500">Teacher-wise Progress</div>
+              <div className="max-h-60 overflow-auto divide-y divide-slate-100">
+                {(adminDashboard.teacher_summary || []).map((t: any) => (
+                  <div key={t.teacher_id} className="px-4 py-3 flex items-center justify-between text-sm">
+                    <div>
+                      <p className="font-bold text-slate-800">{t.teacher_name}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{t.completed_topics}/{t.total_topics} completed</p>
+                    </div>
+                    <span className="font-black text-brand-primary">{t.coverage_percent}%</span>
+                  </div>
+                ))}
+                {(adminDashboard.teacher_summary || []).length === 0 && (
+                  <div className="px-4 py-8 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No teacher summary</div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-500">Subject Coverage</div>
+              <div className="max-h-60 overflow-auto divide-y divide-slate-100">
+                {(adminDashboard.rows || []).map((r: any) => (
+                  <div key={r.subject_id} className="px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold text-slate-800">{r.subject_code} {r.subject_name} ({r.form})</p>
+                      <span className="font-black text-brand-primary">{r.coverage_percent}%</span>
+                    </div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-1">
+                      {r.teacher_name} • Completed {r.completed_topics} • Pending {r.pending_topics} • Tested {r.tested_topics} • Overdue {r.overdue_topics}
+                    </p>
+                  </div>
+                ))}
+                {(adminDashboard.rows || []).length === 0 && (
+                  <div className="px-4 py-8 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No subject data</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-amber-200 overflow-hidden">
+              <div className="px-4 py-3 bg-amber-50 text-[10px] font-black uppercase tracking-widest text-amber-700">
+                Subjects With No Topics Configured
+              </div>
+              <div className="max-h-60 overflow-auto divide-y divide-amber-100">
+                {(adminDashboard.missing_topic_subjects || []).map((r: any) => (
+                  <div key={`missing-subject-${r.subject_id}`} className="px-4 py-3">
+                    <p className="font-bold text-slate-800">{r.subject_code} {r.subject_name} ({r.form})</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700 mt-1">{r.teacher_name}</p>
+                  </div>
+                ))}
+                {(adminDashboard.missing_topic_subjects || []).length === 0 && (
+                  <div className="px-4 py-8 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No missing subjects</div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-amber-200 overflow-hidden">
+              <div className="px-4 py-3 bg-amber-50 text-[10px] font-black uppercase tracking-widest text-amber-700">
+                Teachers Missing Topic Setup
+              </div>
+              <div className="max-h-60 overflow-auto divide-y divide-amber-100">
+                {(adminDashboard.teachers_missing_topic_setup || []).map((t: any) => (
+                  <div key={`missing-teacher-${t.teacher_id}`} className="px-4 py-3 flex items-center justify-between">
+                    <p className="font-bold text-slate-800">{t.teacher_name}</p>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">
+                      {t.missing_subjects} subject{t.missing_subjects === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                ))}
+                {(adminDashboard.teachers_missing_topic_setup || []).length === 0 && (
+                  <div className="px-4 py-8 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No missing teachers</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {teacherHasAssignments && (
       <div className="card-app overflow-hidden">
         <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-[10px] uppercase tracking-[0.2em] text-slate-500">
           Class Overview: {selectedForm}
@@ -289,7 +522,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
               </tr>
             </thead>
             <tbody className="text-[13px] italic">
-              {overview.map((r) => (
+              {teacherOverviewRows.map((r) => (
                 <tr
                   key={r.id}
                   className={`border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer ${selectedSubject === r.id ? 'bg-slate-50/60' : ''}`}
@@ -313,7 +546,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
                   <td className="px-6 py-4 font-bold text-amber-700">{r.tested_topics}</td>
                 </tr>
               ))}
-              {overview.length === 0 && (
+              {teacherOverviewRows.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-6 py-10 text-center text-slate-300 font-bold text-[10px] uppercase tracking-widest">
                     No subjects found for this class.
@@ -324,7 +557,9 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
           </table>
         </div>
       </div>
+      )}
 
+      {teacherHasAssignments && (
       <div className="flex flex-wrap gap-2">
         {([
           ['all', 'All'],
@@ -348,7 +583,9 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
           </button>
         ))}
       </div>
+      )}
 
+      {teacherHasAssignments && (
       <div className="grid grid-cols-1 gap-4">
         {filteredTopics.map((t: any, i: number) => (
           <motion.div 
@@ -448,7 +685,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
                       t.status === 'on_progress' ? 'bg-brand-primary text-white border-brand-primary shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    Set Active
+                    Mark Taught
                   </button>
                   <button 
                     onClick={() => updateStatus(t.id, 'completed')}
@@ -456,7 +693,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
                       t.status === 'completed' ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    Mark Complete
+                    Mark Completed
                   </button>
                   <button
                     onClick={() => openTestModal(t)}
@@ -493,6 +730,7 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
           </div>
         )}
       </div>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -614,21 +852,21 @@ export default function Curriculum({ token, userRole, userId }: CurriculumProps)
                           <td className="px-6 py-3 text-center">
                             {entry.absent ? (
                               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ABSENT</span>
-                            ) : entry.score !== '' ? (
-                              <span className={`font-black ${parseFloat(entry.score) >= 50 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                {entry.score}%
-                              </span>
                             ) : (
-                              <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                placeholder="0-100"
-                                value={entry.score}
-                                onChange={e => handleTestScoreChange(s.id, e.target.value)}
-                                disabled={testSaving}
-                                className="input-app w-24 text-center !py-2 disabled:opacity-50"
-                              />
+                              <div className="inline-flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  step={1}
+                                  placeholder="0-100"
+                                  value={entry.score}
+                                  onChange={e => handleTestScoreChange(s.id, e.target.value)}
+                                  disabled={testSaving}
+                                  className="input-app w-24 text-center !py-2 disabled:opacity-50"
+                                />
+                                <span className="text-[11px] font-black text-slate-400">%</span>
+                              </div>
                             )}
                           </td>
                           <td className="px-6 py-3 text-center">

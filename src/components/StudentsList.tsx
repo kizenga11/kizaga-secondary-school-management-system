@@ -35,6 +35,8 @@ export default function StudentsList({ token }: StudentsListProps) {
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedForm, setSelectedForm] = useState('');
@@ -74,13 +76,17 @@ export default function StudentsList({ token }: StudentsListProps) {
       });
       const data = await res.json();
        const fixedData = (Array.isArray(data) ? data : []).map(student => {
-         if (student.stream_id && !student.stream_name) {
+         let streamName = student.stream_name;
+         if (!streamName && student.streams && student.streams.name) {
+           streamName = student.streams.name;
+         }
+         if (!streamName && student.stream_id) {
            const stream = streams.find(s => s.id === student.stream_id);
            if (stream) {
-             return { ...student, stream_name: stream.name };
+             streamName = stream.name;
            }
          }
-         return student;
+         return { ...student, stream_name: streamName };
        });
        setStudents(fixedData);
     } catch (err) {
@@ -149,13 +155,31 @@ export default function StudentsList({ token }: StudentsListProps) {
     setShowModal(true);
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to remove this student? All academic history will be inaccessible.')) return;
-    const res = await fetch(`/api/students/${id}`, {
+  const openDeleteConfirm = (student: Student) => {
+    setStudentToDelete(student);
+    setShowDeleteConfirm(true);
+  };
+
+  const closeDeleteConfirm = () => {
+    setShowDeleteConfirm(false);
+    setStudentToDelete(null);
+  };
+
+  const handleDelete = async () => {
+    if (!studentToDelete) return;
+    const res = await fetch(`/api/students/${studentToDelete.id}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    if (res.ok) fetchStudents();
+    if (res.ok) {
+      fetchStudents();
+      toast.showSuccess('Student removed successfully.');
+      closeDeleteConfirm();
+    } else {
+      const errorData = await res.json().catch(() => null);
+      const errorMessage = errorData?.error || 'Failed to remove student';
+      toast.showError(errorMessage);
+    }
   };
 
   const handlePromote = async () => {
@@ -309,7 +333,7 @@ export default function StudentsList({ token }: StudentsListProps) {
                     <button onClick={() => handleEdit(s)} className="p-1.5 text-slate-400 hover:text-brand-primary transition-colors">
                       <Edit3 size={14} />
                     </button>
-                    <button onClick={() => handleDelete(s.id)} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors">
+                    <button onClick={() => openDeleteConfirm(s)} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors">
                       <Trash2 size={14} />
                     </button>
                   </td>
@@ -451,6 +475,34 @@ export default function StudentsList({ token }: StudentsListProps) {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirm Modal */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl border border-rose-100"
+            >
+              <div className="p-6 text-center">
+                <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle size={32} className="text-rose-500" />
+                </div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight mb-2">REMOVE STUDENT?</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-medium mb-6 italic">
+                  You are about to remove <span className="text-slate-700 font-bold">{studentToDelete?.full_name || 'this student'}</span>. All academic history will become inaccessible.
+                </p>
+                <div className="flex flex-col space-y-2">
+                  <button onClick={handleDelete} className="btn-dark bg-rose-600 hover:bg-rose-700 py-3">Yes, Remove Student</button>
+                  <button onClick={closeDeleteConfirm} className="py-3 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors">Cancel</button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types.ts';
-import { UserPlus, Search, Trash2, X, Pencil, Eye, EyeOff } from 'lucide-react';
-import { motion } from 'motion/react';
+import { UserPlus, Search, Trash2, X, Pencil, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useToast } from './Toast';
 
 interface UsersListProps {
@@ -24,6 +24,10 @@ export default function UsersList({ token, userRole }: UsersListProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -77,38 +81,82 @@ export default function UsersList({ token, userRole }: UsersListProps) {
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = editingId ? `/api/users/${editingId}` : '/api/users';
-    const method = editingId ? 'PUT' : 'POST';
-    const payload: any = { ...formData };
-    if (editingId && (!payload.password || String(payload.password).trim() === '')) {
-      delete payload.password;
-    }
+    if (isSavingUser) return;
+    setIsSavingUser(true);
 
-    const res = await fetch(url, {
-      method,
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json' 
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      const msg = data?.error || 'Failed to save staff';
-      // Check for duplicate or existing user message
-      if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('duplicate')) {
-        showError('User already exists, record updated');
-      } else {
-        showError(msg);
+    try {
+      const url = editingId ? `/api/users/${editingId}` : '/api/users';
+      const method = editingId ? 'PUT' : 'POST';
+      const payload: any = { ...formData };
+      if (editingId && (!payload.password || String(payload.password).trim() === '')) {
+        delete payload.password;
       }
-      return;
-    }
 
-    const data = await res.json().catch(() => null);
-    closeModal();
-    showSuccess(editingId ? 'Staff updated successfully!' : 'Staff registered successfully!');
-    fetchUsers();
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        const msg = data?.error || 'Failed to save staff';
+        // Check for duplicate or existing user message
+        if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('duplicate')) {
+          showError('User already exists, record updated');
+        } else {
+          showError(msg);
+        }
+        return;
+      }
+
+      await res.json().catch(() => null);
+      closeModal();
+      showSuccess(editingId ? 'Staff updated successfully!' : 'Staff registered successfully!');
+      fetchUsers();
+    } catch (err) {
+      showError('Failed to save staff');
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const openDeleteConfirm = (user: User) => {
+    setUserToDelete(user);
+    setShowDeleteConfirm(true);
+  };
+
+  const closeDeleteConfirm = () => {
+    setShowDeleteConfirm(false);
+    setUserToDelete(null);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete || isDeletingUser) return;
+    setIsDeletingUser(true);
+
+    try {
+      const res = await fetch(`/api/users/${userToDelete.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        showSuccess('Staff deleted successfully');
+        closeDeleteConfirm();
+        fetchUsers();
+      } else {
+        const errorData = await res.json().catch(() => null);
+        showError(errorData?.error || 'Failed to delete staff');
+      }
+    } catch (err) {
+      showError('Failed to delete staff');
+    } finally {
+      setIsDeletingUser(false);
+    }
   };
 
   const filteredUsers = users.filter(u => 
@@ -187,7 +235,11 @@ export default function UsersList({ token, userRole }: UsersListProps) {
                       >
                         <Pencil size={18} />
                       </button>
-                      <button className="text-slate-300 hover:text-red-600 transition-colors" title="Delete (not enabled)">
+                      <button 
+                        onClick={() => openDeleteConfirm(u)}
+                        className="text-slate-300 hover:text-red-600 transition-colors" 
+                        title="Delete"
+                      >
                         <Trash2 size={18} />
                       </button>
                     </div>
@@ -305,21 +357,52 @@ export default function UsersList({ token, userRole }: UsersListProps) {
                 <button 
                   type="button" 
                   onClick={closeModal}
+                  disabled={isSavingUser}
                   className="px-6 py-3 rounded-xl font-bold text-gray-500 hover:text-gray-700"
                 >
                   Ghairi
                 </button>
                 <button 
                   type="submit"
+                  disabled={isSavingUser}
                   className="px-8 py-3 bg-brand-dark text-white rounded-xl font-bold shadow-lg hover:brightness-110 transition-all"
                 >
-                  Hifadhi Taarifa
+                  {isSavingUser ? 'Saving...' : 'Hifadhi Taarifa'}
                 </button>
               </div>
             </form>
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl border border-rose-100"
+            >
+              <div className="p-6 text-center">
+                <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle size={32} className="text-rose-500" />
+                </div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight mb-2">DELETE STAFF?</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-medium mb-6 italic">
+                  You are about to delete <span className="text-slate-700 font-bold">{userToDelete?.full_name || 'this staff member'}</span>. This action cannot be undone.
+                </p>
+                <div className="flex flex-col space-y-2">
+                  <button disabled={isDeletingUser} onClick={handleDeleteUser} className="btn-dark bg-rose-600 hover:bg-rose-700 py-3 disabled:opacity-60 disabled:cursor-not-allowed">
+                    {isDeletingUser ? 'Deleting...' : 'Yes, Delete Staff'}
+                  </button>
+                  <button disabled={isDeletingUser} onClick={closeDeleteConfirm} className="py-3 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">Cancel</button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Subject, User } from '../types.ts';
-import { Plus, UserPlus, Trash2, Pencil, ShieldCheck, BookOpen, GraduationCap, Search } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Plus, UserPlus, Trash2, Pencil, ShieldCheck, BookOpen, GraduationCap, Search, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useToast } from './Toast';
 
 interface AssignmentsProps {
@@ -15,6 +15,8 @@ export default function Assignments({ token }: AssignmentsProps) {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [assignmentToDelete, setAssignmentToDelete] = useState<any | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   
   const [assignData, setAssignData] = useState({
@@ -103,14 +105,25 @@ export default function Assignments({ token }: AssignmentsProps) {
     }
   };
 
-  const handleRemove = async (id: number) => {
-    if (!confirm('Are you sure you want to remove this assignment?')) return;
-    
+  const openDeleteConfirm = (assignment: any) => {
+    setAssignmentToDelete(assignment);
+    setShowDeleteConfirm(true);
+  };
+
+  const closeDeleteConfirm = () => {
+    setShowDeleteConfirm(false);
+    setAssignmentToDelete(null);
+  };
+
+  const handleRemove = async () => {
+    if (!assignmentToDelete) return;
+
     try {
-      await fetch(`/api/assignments/${id}`, {
+      await fetch(`/api/assignments/${assignmentToDelete.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      closeDeleteConfirm();
       fetchData();
     } catch (e) {
       console.error(e);
@@ -211,7 +224,7 @@ export default function Assignments({ token }: AssignmentsProps) {
                       <Pencil size={14} />
                     </button>
                     <button 
-                      onClick={() => handleRemove(a.id)}
+                      onClick={() => openDeleteConfirm(a)}
                       className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"
                       title="Delete"
                       aria-label="Delete deployment"
@@ -307,6 +320,33 @@ export default function Assignments({ token }: AssignmentsProps) {
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl border border-rose-100"
+            >
+              <div className="p-6 text-center">
+                <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle size={32} className="text-rose-500" />
+                </div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight mb-2">REMOVE DEPLOYMENT?</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-medium mb-6 italic">
+                  You are about to remove deployment for <span className="text-slate-700 font-bold">{assignmentToDelete?.users?.full_name || 'selected staff'}</span>.
+                </p>
+                <div className="flex flex-col space-y-2">
+                  <button onClick={handleRemove} className="btn-dark bg-rose-600 hover:bg-rose-700 py-3">Yes, Remove Deployment</button>
+                  <button onClick={closeDeleteConfirm} className="py-3 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors">Cancel</button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

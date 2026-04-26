@@ -7,12 +7,14 @@ import { useToast } from './Toast';
 interface ResultsEntryProps {
   token: string;
   userRole: string;
+  userId: number;
 }
 
-export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
+export default function ResultsEntry({ token, userRole, userId }: ResultsEntryProps) {
   const toast = useToast();
   const [exams, setExams] = useState<Exam[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [assignments, setAssignments] = useState<Array<{ teacher_id: number; subject_id: number }>>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [results, setResults] = useState<Record<number, { score: string; absent: boolean }>>({});
   
@@ -22,6 +24,16 @@ export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
   const [showExamModal, setShowExamModal] = useState(false);
   const [examData, setExamData] = useState({ name: '', type: 'Test' });
   const [loading, setLoading] = useState(false);
+
+  const subjectsForEntry = React.useMemo(() => {
+    if (userRole !== 'teacher') return subjects;
+    const allowedIds = new Set(
+      assignments
+        .filter(a => Number(a.teacher_id) === Number(userId))
+        .map(a => Number(a.subject_id))
+    );
+    return subjects.filter(s => allowedIds.has(Number(s.id)));
+  }, [userRole, subjects, assignments, userId]);
 
   useEffect(() => {
     fetchExamsAndSubjects();
@@ -48,15 +60,44 @@ export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
     setResults({});
   }, [selectedSubject, subjects]);
 
+  useEffect(() => {
+    if (subjectsForEntry.length === 0) {
+      setSelectedSubject(null);
+      return;
+    }
+    if (!selectedSubject || !subjectsForEntry.some(s => s.id === selectedSubject)) {
+      setSelectedSubject(subjectsForEntry[0].id);
+    }
+  }, [subjectsForEntry, selectedSubject]);
+
   const fetchExamsAndSubjects = async () => {
     const eRes = await fetch('/api/exams', { headers: { 'Authorization': `Bearer ${token}` } });
     const sRes = await fetch('/api/subjects', { headers: { 'Authorization': `Bearer ${token}` } });
+    const aRes = await fetch('/api/assignments', { headers: { 'Authorization': `Bearer ${token}` } });
     const eData = await eRes.json();
     const sData = await sRes.json();
-    setExams(eData);
-    setSubjects(sData);
-    if (eData.length > 0) setSelectedExam(eData[0].id);
-    if (sData.length > 0) setSelectedSubject(sData[0].id);
+    const aData = await aRes.json();
+
+    const examsArr = Array.isArray(eData) ? eData : [];
+    const subjectsArr = Array.isArray(sData) ? sData : [];
+    const assignmentsArr = Array.isArray(aData) ? aData : [];
+
+    setExams(examsArr);
+    setSubjects(subjectsArr);
+    setAssignments(assignmentsArr);
+    if (examsArr.length > 0) setSelectedExam(examsArr[0].id);
+
+    if (userRole === 'teacher') {
+      const allowedIds = new Set(
+        assignmentsArr
+          .filter((a: any) => Number(a.teacher_id) === Number(userId))
+          .map((a: any) => Number(a.subject_id))
+      );
+      const allowedSubjects = subjectsArr.filter((s: Subject) => allowedIds.has(Number(s.id)));
+      setSelectedSubject(allowedSubjects.length > 0 ? allowedSubjects[0].id : null);
+    } else {
+      setSelectedSubject(subjectsArr.length > 0 ? subjectsArr[0].id : null);
+    }
   };
 
   const fetchStudentsAndResults = async () => {
@@ -115,6 +156,15 @@ export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
 
   const handleSave = async () => {
     if (!selectedExam || !selectedSubject) return;
+    if (userRole === 'teacher') {
+      const canEnter = assignments.some(
+        a => Number(a.teacher_id) === Number(userId) && Number(a.subject_id) === Number(selectedSubject)
+      );
+      if (!canEnter) {
+        toast.showError('You are not deployed to enter results for this subject.');
+        return;
+      }
+    }
     if (component === null) {
       toast.showError('Chagua Theory au Practical kwanza.');
       return;
@@ -207,8 +257,13 @@ export default function ResultsEntry({ token, userRole }: ResultsEntryProps) {
               className="input-app"
             >
               <option value="">-- SELECT SUBJECT --</option>
-              {subjects.map(s => <option key={s.id} value={s.id}>{s.name} - {s.form}</option>)}
+              {subjectsForEntry.map(s => <option key={s.id} value={s.id}>{s.name} - {s.form}</option>)}
             </select>
+            {userRole === 'teacher' && subjectsForEntry.length === 0 && (
+              <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-rose-500">
+                No subject deployment found for your account. Contact admin.
+              </p>
+            )}
           </div>
         </div>
 

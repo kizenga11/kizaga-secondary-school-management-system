@@ -107,6 +107,10 @@ export default function Reports({ token }: ReportsProps) {
 
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>('all');
+  const [teachingTeacherFilter, setTeachingTeacherFilter] = useState<string>('all');
+  const [teachingSubjectFilter, setTeachingSubjectFilter] = useState<string>('all');
+  const [examFormFilter, setExamFormFilter] = useState<string>('All');
+  const [examSubjectFilter, setExamSubjectFilter] = useState<string>('all');
 
   const [teachingRows, setTeachingRows] = useState<TeachingRow[]>([]);
   const [examRows, setExamRows] = useState<ExamReportRow[]>([]);
@@ -217,7 +221,7 @@ export default function Reports({ token }: ReportsProps) {
 
   const downloadTeaching = () => {
     const headers = ['Form', 'Subject Code', 'Subject', 'Teacher', 'Total Topics', 'Completed', 'On Progress', 'Pending', 'Tested', 'Coverage %'];
-    const rows = teachingRows.map(r => [
+    const rows = filteredTeachingRows.map(r => [
       r.form,
       r.code,
       r.subject,
@@ -239,7 +243,7 @@ export default function Reports({ token }: ReportsProps) {
   const downloadExams = () => {
     const title = examMeta ? `${examMeta.name} (${examMeta.type})` : 'Exam';
     const headers = ['Form', 'Subject Code', 'Subject', 'Component', 'Entries', 'Present', 'Absent', 'Mean', 'Min', 'Max'];
-    const rows = examRows.map(r => [
+    const rows = filteredExamRows.map(r => [
       r.form,
       r.code,
       r.subject,
@@ -332,6 +336,37 @@ export default function Reports({ token }: ReportsProps) {
     { id: 'teachers' as const, label: 'Teachers' },
   ];
 
+  const teachingTeachers = useMemo(
+    () => Array.from(new Set(teachingRows.map(r => r.teacher).filter(Boolean))),
+    [teachingRows]
+  );
+
+  const teachingSubjects = useMemo(
+    () => Array.from(new Set(teachingRows.map(r => `${r.code}||${r.subject}`))),
+    [teachingRows]
+  );
+
+  const filteredTeachingRows = useMemo(() => {
+    return teachingRows.filter(r => {
+      const passTeacher = teachingTeacherFilter === 'all' || r.teacher === teachingTeacherFilter;
+      const passSubject = teachingSubjectFilter === 'all' || `${r.code}||${r.subject}` === teachingSubjectFilter;
+      return passTeacher && passSubject;
+    });
+  }, [teachingRows, teachingTeacherFilter, teachingSubjectFilter]);
+
+  const examSubjects = useMemo(
+    () => Array.from(new Set(examRows.map(r => `${r.code}||${r.subject}`))),
+    [examRows]
+  );
+
+  const filteredExamRows = useMemo(() => {
+    return examRows.filter(r => {
+      const passForm = examFormFilter === 'All' || r.form === examFormFilter;
+      const passSubject = examSubjectFilter === 'all' || `${r.code}||${r.subject}` === examSubjectFilter;
+      return passForm && passSubject;
+    });
+  }, [examRows, examFormFilter, examSubjectFilter]);
+
   return (
     <div className="space-y-6">
       <header className="section-header">
@@ -381,17 +416,65 @@ export default function Reports({ token }: ReportsProps) {
               </select>
             )}
 
+            {tab === 'teaching' && (
+              <>
+                <select
+                  className="input-app py-1 tracking-tight !w-auto"
+                  value={teachingTeacherFilter}
+                  onChange={e => setTeachingTeacherFilter(e.target.value)}
+                >
+                  <option value="all">All teachers</option>
+                  {teachingTeachers.map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <select
+                  className="input-app py-1 tracking-tight !w-auto"
+                  value={teachingSubjectFilter}
+                  onChange={e => setTeachingSubjectFilter(e.target.value)}
+                >
+                  <option value="all">All subjects</option>
+                  {teachingSubjects.map(s => {
+                    const [code, subject] = s.split('||');
+                    return <option key={s} value={s}>{code} - {subject}</option>;
+                  })}
+                </select>
+              </>
+            )}
+
             {tab === 'exams' && (
-              <select
-                className="input-app py-1 tracking-tight !w-auto"
-                value={selectedExamId ?? ''}
-                onChange={e => setSelectedExamId(e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">Select exam</option>
-                {exams.map(ex => (
-                  <option key={ex.id} value={ex.id}>{ex.name} ({ex.type})</option>
-                ))}
-              </select>
+              <>
+                <select
+                  className="input-app py-1 tracking-tight !w-auto"
+                  value={selectedExamId ?? ''}
+                  onChange={e => setSelectedExamId(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">Select exam</option>
+                  {exams.map(ex => (
+                    <option key={ex.id} value={ex.id}>{ex.name} ({ex.type})</option>
+                  ))}
+                </select>
+                <select
+                  className="input-app py-1 tracking-tight !w-auto"
+                  value={examFormFilter}
+                  onChange={e => setExamFormFilter(e.target.value)}
+                >
+                  {forms.map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+                <select
+                  className="input-app py-1 tracking-tight !w-auto"
+                  value={examSubjectFilter}
+                  onChange={e => setExamSubjectFilter(e.target.value)}
+                >
+                  <option value="all">All subjects</option>
+                  {examSubjects.map(s => {
+                    const [code, subject] = s.split('||');
+                    return <option key={s} value={s}>{code} - {subject}</option>;
+                  })}
+                </select>
+              </>
             )}
 
             {tab === 'teachers' && (
@@ -438,7 +521,7 @@ export default function Reports({ token }: ReportsProps) {
                 </tr>
               </thead>
               <tbody className="text-[13px]">
-                {teachingRows.map((r, idx) => (
+                {filteredTeachingRows.map((r, idx) => (
                   <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-3 font-bold text-slate-700">{r.form}</td>
                     <td className="px-6 py-3">
@@ -451,7 +534,7 @@ export default function Reports({ token }: ReportsProps) {
                     <td className="px-6 py-3 text-center font-black text-brand-primary">{r.coverage_percent}%</td>
                   </tr>
                 ))}
-                {teachingRows.length === 0 && (
+                {filteredTeachingRows.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-6 py-10 text-center text-slate-300 font-bold text-[10px] uppercase tracking-widest">
                       No data.
@@ -477,7 +560,7 @@ export default function Reports({ token }: ReportsProps) {
                 </tr>
               </thead>
               <tbody className="text-[13px]">
-                {examRows.map((r, idx) => (
+                {filteredExamRows.map((r, idx) => (
                   <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-3 font-bold text-slate-700">{r.form}</td>
                     <td className="px-6 py-3">
@@ -492,7 +575,7 @@ export default function Reports({ token }: ReportsProps) {
                     <td className="px-6 py-3 text-center font-bold text-slate-700">{r.max_score ?? '-'}</td>
                   </tr>
                 ))}
-                {examRows.length === 0 && (
+                {filteredExamRows.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-6 py-10 text-center text-slate-300 font-bold text-[10px] uppercase tracking-widest">
                       Select an exam to load report.

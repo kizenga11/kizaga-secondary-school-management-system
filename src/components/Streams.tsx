@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Subject } from '../types.ts';
-import { Plus, Pencil, Trash2, Layers } from 'lucide-react';
+import { Plus, Pencil, Trash2, Layers, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useToast } from './Toast';
 
@@ -28,6 +28,7 @@ export default function Streams({ token }: StreamsProps) {
   const [streamData, setStreamData] = useState({ form: 'Form 1', name: '' });
 
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<number[]>([]);
+  const [subjectSearch, setSubjectSearch] = useState('');
 
   useEffect(() => {
     fetchSubjects();
@@ -52,6 +53,19 @@ export default function Streams({ token }: StreamsProps) {
     () => (Array.isArray(streams) ? streams : []).filter(s => s.form === selectedForm),
     [streams, selectedForm]
   );
+
+  const selectedStream = useMemo(
+    () => streamsForForm.find(s => s.id === selectedStreamId) || null,
+    [streamsForForm, selectedStreamId]
+  );
+
+  const filteredSubjectsForForm = useMemo(() => {
+    const q = subjectSearch.trim().toLowerCase();
+    if (!q) return subjectsForForm;
+    return subjectsForForm.filter(
+      s => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)
+    );
+  }, [subjectsForForm, subjectSearch]);
 
   const fetchSubjects = async () => {
     const res = await fetch('/api/subjects', { headers: { 'Authorization': `Bearer ${token}` } });
@@ -137,6 +151,15 @@ export default function Streams({ token }: StreamsProps) {
 
   const toggleSubject = (id: number) => {
     setSelectedSubjectIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const selectAllFilteredSubjects = () => {
+    const ids = filteredSubjectsForForm.map(s => s.id);
+    setSelectedSubjectIds(prev => Array.from(new Set([...prev, ...ids])));
+  };
+
+  const clearAllSubjects = () => {
+    setSelectedSubjectIds([]);
   };
 
   const saveSubjects = async () => {
@@ -260,8 +283,44 @@ export default function Streams({ token }: StreamsProps) {
             )}
 
             {selectedStreamId && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {subjectsForForm.map((subj) => {
+              <div className="space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Assigning for <span className="text-brand-primary">{selectedForm} {selectedStream?.name}</span>
+                    <span className="ml-2 text-slate-300">({selectedSubjectIds.length} selected)</span>
+                  </div>
+                  <div className="flex-1 lg:max-w-sm relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={subjectSearch}
+                      onChange={(e) => setSubjectSearch(e.target.value)}
+                      className="input-app pl-9 py-2"
+                      placeholder="Search subject name or code..."
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllFilteredSubjects}
+                      disabled={filteredSubjectsForForm.length === 0}
+                      className="px-3 py-2 rounded-md border border-slate-200 text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Select Visible
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearAllSubjects}
+                      disabled={selectedSubjectIds.length === 0}
+                      className="px-3 py-2 rounded-md border border-slate-200 text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filteredSubjectsForForm.map((subj) => {
                   const checked = selectedSubjectIds.includes(subj.id);
                   return (
                     <button
@@ -287,11 +346,18 @@ export default function Streams({ token }: StreamsProps) {
                   );
                 })}
 
-                {subjectsForForm.length === 0 && (
-                  <div className="p-10 text-center text-slate-300 font-bold text-[10px] uppercase tracking-widest md:col-span-2">
-                    No subjects for {selectedForm}. Create subjects first.
-                  </div>
-                )}
+                  {subjectsForForm.length === 0 && (
+                    <div className="p-10 text-center text-slate-300 font-bold text-[10px] uppercase tracking-widest md:col-span-2">
+                      No subjects for {selectedForm}. Create subjects first.
+                    </div>
+                  )}
+
+                  {subjectsForForm.length > 0 && filteredSubjectsForForm.length === 0 && (
+                    <div className="p-10 text-center text-slate-300 font-bold text-[10px] uppercase tracking-widest md:col-span-2">
+                      No subject matches your search.
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

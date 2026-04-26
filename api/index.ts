@@ -157,9 +157,12 @@ app.post('/api/users', authenticateToken, async (req, res) => {
  email,
  phone,
  role,
- user_id
+ user_id,
+ password
 } = req.body;
     
+    const finalTscNo = tsc_no && tsc_no.trim() !== '' ? tsc_no : null;
+
     // Check if user already exists in public.users table
     const { data: existingUser, error: existingErr } = await supabase
 .from('users')
@@ -168,32 +171,17 @@ app.post('/api/users', authenticateToken, async (req, res) => {
 .maybeSingle();
     
     if (existingUser) {
-      // Update existing user instead of creating new
-      const { data, error } = await supabase
-        .from('users')
-        .update({
-          full_name,
-          tsc_no,
-          phone,
-          role: role || 'teacher'
-        })
-        .eq('id', existingUser.id)
-        .select()
-        .single();
-      
-      if (error) return res.status(400).json({ error: error.message });
-      return res.status(200).json({ message: 'User already exists, record updated', user: data });
+      return res.status(400).json({ error: 'User with this email already exists in the system.' });
     }
     
-    // Check if auth user already exists
+    // Check if auth user already exists (linking case)
     if (user_id) {
-      // Link existing auth user to public.users
       const { data, error } = await supabase
         .from('users')
         .insert({
           user_id,
           full_name,
-          tsc_no,
+          tsc_no: finalTscNo,
           email,
           phone,
           role: role || 'teacher'
@@ -202,51 +190,24 @@ app.post('/api/users', authenticateToken, async (req, res) => {
         .single();
       
       if (error) {
-        // If linking fails due to other constraint, try update
-        if (error.message.includes('duplicate')) {
-          const { data: updated, error: updateError } = await supabase
-            .from('users')
-            .update({ full_name, tsc_no, phone, role: role || 'teacher' })
-            .eq('user_id', user_id)
-            .select()
-            .single();
-          
-          if (updateError) return res.status(400).json({ error: updateError.message });
-          return res.status(200).json({ message: 'User already exists, record updated', user: updated });
-        }
         return res.status(400).json({ error: error.message });
       }
       return res.status(201).json({ message: 'User created', user: data });
     }
     
-    // Try to create new auth user first
-    const tempPassword = Math.random().toString(36).slice(-8) + 'A1!';
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    const finalPassword = password && password.trim() !== '' ? password : Math.random().toString(36).slice(-8) + 'A1!';
+    
+    if (!supabase.auth.admin) {
+        return res.status(500).json({ error: 'Server configured without service_role key, cannot create users.' });
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
-      password: tempPassword,
+      password: finalPassword,
+      email_confirm: true,
     });
     
     if (authError) {
-      // If auth signup fails (user exists), try to update existing
-      if (authError.message.includes('already been registered') || authError.message.includes('already exists')) {
-        const { data: foundUser } = await supabase
-          .from('users')
-          .select('id')
-          .eq('email', email)
-          .single();
-        
-        if (foundUser) {
-          const { data: updated, error: updateError } = await supabase
-            .from('users')
-            .update({ full_name, tsc_no, phone, role: role || 'teacher' })
-            .eq('id', foundUser.id)
-            .select()
-            .single();
-          
-          if (updateError) return res.status(400).json({ error: updateError.message });
-          return res.status(200).json({ message: 'User already exists, record updated', user: updated });
-        }
-      }
       return res.status(400).json({ error: authError.message });
     }
     
@@ -256,7 +217,7 @@ app.post('/api/users', authenticateToken, async (req, res) => {
       .insert({
         user_id: authData.user?.id,
         full_name,
-        tsc_no,
+        tsc_no: finalTscNo,
         email,
         phone,
         role: role || 'teacher'
@@ -266,6 +227,120 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ message: 'User created', user: data });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'headmaster') {
+    return res.status(403).json({ error: 'Only headmaster can update users' });
+  }
+
+  const { full_name, tsc_no, email, phone, role, password } = req.body;
+  const userId = req.params.id;
+  const finalTscNo = tsc_no && tsc_no.trim() !== '' ? tsc_no : null;
+
+  try {
+    const { data: existingUser, error: findError } = await supabase
+      .from('users')
+      .select('user_id')
+      .eq('id', userId)
+      .single();
+
+    if (findError || !existingUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const { data: updatedUser, error: updateError } = await supabase
+      .from('users')
+      .update({
+        full_name,
+        tsc_no: finalTscNo,
+        email,
+        phone,
+        role: role || 'teacher'
+      })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (updateError) {
+      return res.status(400).json({ error: updateError.message });
+    }
+
+    if (existingUser.user_id && supabase.auth.admin) {
+      const authUpdates: any = {};
+      if (email) authUpdates.email = email;
+      if (password && password.trim() !== '') authUpdates.password = password;
+
+      if (Object.keys(authUpdates).length > 0) {
+        const { error: authError } = await supabase.auth.admin.updateUserById(
+          existingUser.user_id,
+          authUpdates
+        );
+        if (authError) {
+           console.error('Failed to update auth user:', authError.message);
+        }
+      }
+    }
+
+    res.json({ message: 'User updated successfully', user: updatedUser });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/users/:id', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'headmaster') {
+    return res.status(403).json({ error: 'Only headmaster can delete users' });
+  }
+
+  const identifier = String(req.params.id || '').trim();
+
+  try {
+    if (!identifier) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const isNumericId = /^\d+$/.test(identifier);
+    const { data: existingUser, error: findError } = isNumericId
+      ? await supabase
+          .from('users')
+          .select('id, user_id')
+          .eq('id', Number(identifier))
+          .single()
+      : await supabase
+          .from('users')
+          .select('id, user_id')
+          .eq('user_id', identifier)
+          .single();
+
+    if (findError || !existingUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Delete from local users table
+    const { error: deleteError } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', existingUser.id);
+
+    if (deleteError) {
+      return res.status(400).json({ error: deleteError.message });
+    }
+
+    // Also delete from Supabase Auth if user_id exists
+    if (existingUser.user_id && supabase.auth.admin) {
+      const { error: authError } = await supabase.auth.admin.deleteUser(
+        existingUser.user_id
+      );
+      if (authError) {
+        console.error('Failed to delete auth user:', authError.message);
+      }
+    }
+
+    res.json({ message: 'User deleted successfully' });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -648,7 +723,29 @@ app.delete('/api/streams/:id', authenticateToken, async (req, res) => {
 app.get('/api/topics', authenticateToken, async (req, res) => {
   const { subject_id } = req.query;
   let query = supabase.from('topics').select('*');
-  if (subject_id) query = query.eq('subject_id', subject_id);
+
+  if (req.userRole === 'teacher') {
+    const { data: teacherAssignments, error: assignmentError } = await supabase
+      .from('assignments')
+      .select('subject_id')
+      .eq('teacher_id', req.userId);
+    if (assignmentError) return res.status(500).json({ error: assignmentError.message });
+
+    const allowedSubjectIds = (teacherAssignments || []).map((a: any) => a.subject_id);
+    if (allowedSubjectIds.length === 0) return res.json([]);
+
+    if (subject_id) {
+      const requestedSubjectId = Number(subject_id);
+      if (!allowedSubjectIds.includes(requestedSubjectId)) {
+        return res.status(403).json({ error: 'You are not assigned to this subject' });
+      }
+      query = query.eq('subject_id', requestedSubjectId);
+    } else {
+      query = query.in('subject_id', allowedSubjectIds);
+    }
+  } else if (subject_id) {
+    query = query.eq('subject_id', subject_id);
+  }
   
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
@@ -659,8 +756,27 @@ app.get('/api/topics/test-counts', authenticateToken, async (req, res) => {
   const { ids } = req.query;
   if (!ids) return res.json([]);
   
-  const idArray = String(ids).split(',').map(Number).filter(n => Number.isFinite(n));
+  let idArray = String(ids).split(',').map(Number).filter(n => Number.isFinite(n));
   if (idArray.length === 0) return res.json([]);
+
+  if (req.userRole === 'teacher') {
+    const { data: allowedTopics, error: allowedTopicsError } = await supabase
+      .from('topics')
+      .select('id')
+      .in('id', idArray)
+      .in(
+        'subject_id',
+        (
+          await supabase
+            .from('assignments')
+            .select('subject_id')
+            .eq('teacher_id', req.userId)
+        ).data?.map((a: any) => a.subject_id) || []
+      );
+    if (allowedTopicsError) return res.status(500).json({ error: allowedTopicsError.message });
+    idArray = (allowedTopics || []).map((t: any) => t.id);
+    if (idArray.length === 0) return res.json([]);
+  }
   
   const { data, error } = await supabase
     .from('topic_test_results')
@@ -711,6 +827,13 @@ app.get('/api/topics/:id/students', authenticateToken, async (req, res) => {
     .single();
   
   if (!topic) return res.status(404).json({ error: 'Topic not found' });
+
+  if (req.userRole === 'teacher') {
+    const allowed = await isTeacherAssignedToSubject(Number(req.userId), Number(topic.subject_id));
+    if (!allowed) {
+      return res.status(403).json({ error: 'You are not assigned to this subject' });
+    }
+  }
   
   const { data: subject } = await supabase
     .from('subjects')
@@ -732,6 +855,20 @@ app.get('/api/topics/:id/students', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/topics/:id/test-results', authenticateToken, async (req, res) => {
+  if (req.userRole === 'teacher') {
+    const { data: topic, error: topicError } = await supabase
+      .from('topics')
+      .select('subject_id')
+      .eq('id', req.params.id)
+      .single();
+    if (topicError || !topic) return res.status(404).json({ error: 'Topic not found' });
+
+    const allowed = await isTeacherAssignedToSubject(Number(req.userId), Number(topic.subject_id));
+    if (!allowed) {
+      return res.status(403).json({ error: 'You are not assigned to this subject' });
+    }
+  }
+
   const { data, error } = await supabase
     .from('topic_test_results')
     .select('student_id, score, absent')
@@ -741,9 +878,35 @@ app.get('/api/topics/:id/test-results', authenticateToken, async (req, res) => {
   res.json({ results: data || [] });
 });
 
+const isTeacherAssignedToSubject = async (teacherId: number, subjectId: number) => {
+  const { data, error } = await supabase
+    .from('assignments')
+    .select('id')
+    .eq('teacher_id', teacherId)
+    .eq('subject_id', subjectId)
+    .maybeSingle();
+  return !error && Boolean(data);
+};
+
 app.post('/api/topics/:id/test-results', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'teacher') {
+    return res.status(403).json({ error: 'Only assigned teachers can enter topic test scores' });
+  }
+
   const { results } = req.body;
   const topicId = req.params.id;
+
+  const { data: topic, error: topicError } = await supabase
+    .from('topics')
+    .select('id, subject_id')
+    .eq('id', topicId)
+    .single();
+  if (topicError || !topic) return res.status(404).json({ error: 'Topic not found' });
+
+  const allowed = await isTeacherAssignedToSubject(Number(req.userId), Number(topic.subject_id));
+  if (!allowed) {
+    return res.status(403).json({ error: 'You are not assigned to this subject' });
+  }
   
   const inserts = (results || []).map((r: any) => ({
     topic_id: topicId,
@@ -754,11 +917,67 @@ app.post('/api/topics/:id/test-results', authenticateToken, async (req, res) => 
   
   const { error } = await supabase.from('topic_test_results').upsert(inserts);
   if (error) return res.status(400).json({ error: error.message });
+
+  const { data: subject } = await supabase
+    .from('subjects')
+    .select('id, form')
+    .eq('id', topic.subject_id)
+    .single();
+
+  const { data: students } = await supabase
+    .from('students')
+    .select('id, stream_id')
+    .eq('form', subject?.form)
+    .neq('form', 'Graduated');
+
+  const streamIds = Array.from(
+    new Set((students || []).map((s: any) => s.stream_id).filter((sid: any) => sid !== null))
+  );
+  const { data: streamSubjects } = streamIds.length > 0
+    ? await supabase
+        .from('stream_subjects')
+        .select('stream_id')
+        .eq('subject_id', topic.subject_id)
+        .in('stream_id', streamIds)
+    : { data: [], error: null as any };
+
+  const allowedStreamIds = new Set((streamSubjects || []).map((ss: any) => ss.stream_id));
+  const eligibleStudents = (students || []).filter((s: any) => s.stream_id === null || allowedStreamIds.has(s.stream_id));
+  const totalEligible = eligibleStudents.length;
+
+  const { data: enteredRows } = await supabase
+    .from('topic_test_results')
+    .select('student_id, score')
+    .eq('topic_id', topicId)
+    .not('score', 'is', null);
+
+  const enteredStudentIds = new Set((enteredRows || []).map((r: any) => r.student_id));
+  const enteredCount = eligibleStudents.filter((s: any) => enteredStudentIds.has(s.id)).length;
+  const tested = totalEligible > 0 && enteredCount >= Math.ceil(totalEligible * 0.5);
+
+  await supabase
+    .from('topics')
+    .update({ tested })
+    .eq('id', topicId);
   
   res.json({ message: 'Test results saved' });
 });
 
 app.post('/api/topics', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'teacher') {
+    return res.status(403).json({ error: 'Only assigned teachers can create topics' });
+  }
+
+  const subjectId = Number(req.body?.subject_id);
+  if (!Number.isFinite(subjectId)) {
+    return res.status(400).json({ error: 'Subject is required' });
+  }
+
+  const allowed = await isTeacherAssignedToSubject(Number(req.userId), subjectId);
+  if (!allowed) {
+    return res.status(403).json({ error: 'You are not assigned to this subject' });
+  }
+
   const { data, error } = await supabase
     .from('topics')
     .insert({ ...req.body, tested: false })
@@ -770,15 +989,261 @@ app.post('/api/topics', authenticateToken, async (req, res) => {
 });
 
 app.patch('/api/topics/:id', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'teacher') {
+    return res.status(403).json({ error: 'Only assigned teachers can update topics' });
+  }
+
+  const { data: topic, error: topicError } = await supabase
+    .from('topics')
+    .select('id, subject_id')
+    .eq('id', req.params.id)
+    .single();
+  if (topicError || !topic) return res.status(404).json({ error: 'Topic not found' });
+
+  const allowed = await isTeacherAssignedToSubject(Number(req.userId), Number(topic.subject_id));
+  if (!allowed) {
+    return res.status(403).json({ error: 'You are not assigned to this subject' });
+  }
+
+  const updatePayload = { ...req.body };
+  if ('tested' in updatePayload) {
+    delete (updatePayload as any).tested;
+  }
+
   const { data, error } = await supabase
     .from('topics')
-    .update(req.body)
+    .update(updatePayload)
     .eq('id', req.params.id)
     .select()
     .single();
   
   if (error) return res.status(400).json({ error: error.message });
   res.json({ message: 'Topic updated', topic: data });
+});
+
+app.get('/api/curriculum/admin-dashboard', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'headmaster' && req.userRole !== 'academic') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { teacher_id, subject_id, form, stream_id } = req.query as any;
+
+  let subjectQuery = supabase.from('subjects').select('id, name, code, form');
+  if (subject_id) subjectQuery = subjectQuery.eq('id', Number(subject_id));
+  if (form && form !== 'All') subjectQuery = subjectQuery.eq('form', form);
+  const { data: allSubjects, error: subjError } = await subjectQuery;
+  if (subjError) return res.status(500).json({ error: subjError.message });
+
+  const subjects = allSubjects || [];
+  if (subjects.length === 0) {
+    return res.json({
+      summary: { total_topics: 0, completed_topics: 0, on_progress_topics: 0, tested_topics: 0, coverage_percent: 0, overdue_topics: 0 },
+      teacher_summary: [],
+      rows: []
+    });
+  }
+
+  let filteredSubjectIds = subjects.map((s: any) => s.id);
+
+  if (stream_id) {
+    const { data: streamSubjects } = await supabase
+      .from('stream_subjects')
+      .select('subject_id')
+      .eq('stream_id', Number(stream_id));
+    const streamSubjectIds = new Set((streamSubjects || []).map((ss: any) => ss.subject_id));
+    filteredSubjectIds = filteredSubjectIds.filter((id: number) => streamSubjectIds.has(id));
+  }
+
+  if (filteredSubjectIds.length === 0) {
+    return res.json({
+      summary: { total_topics: 0, completed_topics: 0, on_progress_topics: 0, tested_topics: 0, coverage_percent: 0, overdue_topics: 0 },
+      teacher_summary: [],
+      rows: []
+    });
+  }
+
+  let assignmentQuery = supabase
+    .from('assignments')
+    .select('subject_id, teacher_id, users(full_name)')
+    .in('subject_id', filteredSubjectIds);
+  if (teacher_id && teacher_id !== 'all') assignmentQuery = assignmentQuery.eq('teacher_id', Number(teacher_id));
+  const { data: assignments } = await assignmentQuery;
+  const assignmentList = assignments || [];
+  const assignedSubjectIds = new Set(assignmentList.map((a: any) => a.subject_id));
+  filteredSubjectIds = filteredSubjectIds.filter((id: number) => assignedSubjectIds.has(id));
+
+  if (filteredSubjectIds.length === 0) {
+    return res.json({
+      summary: { total_topics: 0, completed_topics: 0, on_progress_topics: 0, tested_topics: 0, coverage_percent: 0, overdue_topics: 0 },
+      teacher_summary: [],
+      rows: []
+    });
+  }
+
+  const subjectMap = new Map(subjects.map((s: any) => [s.id, s]));
+  const teacherBySubject = new Map<number, { teacher_id: number; teacher_name: string }>();
+  for (const a of assignmentList) {
+    teacherBySubject.set(a.subject_id, {
+      teacher_id: a.teacher_id,
+      teacher_name: a.users?.full_name || 'Unassigned',
+    });
+  }
+
+  const { data: topics } = await supabase
+    .from('topics')
+    .select('id, subject_id, status, tested, deadline')
+    .in('subject_id', filteredSubjectIds);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const topicList = topics || [];
+
+  const rows = filteredSubjectIds.map((sid: number) => {
+    const subj = subjectMap.get(sid);
+    const rowTopics = topicList.filter((t: any) => t.subject_id === sid);
+    const total = rowTopics.length;
+    const completed = rowTopics.filter((t: any) => t.status === 'completed').length;
+    const onProgress = rowTopics.filter((t: any) => t.status === 'on_progress').length;
+    const tested = rowTopics.filter((t: any) => Boolean(t.tested)).length;
+    const overdue = rowTopics.filter((t: any) => t.deadline && t.status !== 'completed' && new Date(t.deadline) < today).length;
+    return {
+      subject_id: sid,
+      subject_name: subj?.name || '',
+      subject_code: subj?.code || '',
+      form: subj?.form || '',
+      teacher_id: teacherBySubject.get(sid)?.teacher_id || null,
+      teacher_name: teacherBySubject.get(sid)?.teacher_name || 'Unassigned',
+      total_topics: total,
+      completed_topics: completed,
+      on_progress_topics: onProgress,
+      pending_topics: rowTopics.filter((t: any) => t.status === 'pending').length,
+      tested_topics: tested,
+      overdue_topics: overdue,
+      coverage_percent: total > 0 ? Math.round((completed / total) * 100) : 0,
+    };
+  });
+
+  const summary = rows.reduce(
+    (acc: any, r: any) => {
+      acc.total_topics += r.total_topics;
+      acc.completed_topics += r.completed_topics;
+      acc.on_progress_topics += r.on_progress_topics;
+      acc.tested_topics += r.tested_topics;
+      acc.overdue_topics += r.overdue_topics;
+      return acc;
+    },
+    { total_topics: 0, completed_topics: 0, on_progress_topics: 0, tested_topics: 0, overdue_topics: 0 }
+  );
+  summary.coverage_percent = summary.total_topics > 0
+    ? Math.round((summary.completed_topics / summary.total_topics) * 100)
+    : 0;
+
+  const teacherSummaryMap = new Map<number, any>();
+  for (const r of rows) {
+    if (!r.teacher_id) continue;
+    if (!teacherSummaryMap.has(r.teacher_id)) {
+      teacherSummaryMap.set(r.teacher_id, {
+        teacher_id: r.teacher_id,
+        teacher_name: r.teacher_name,
+        total_topics: 0,
+        completed_topics: 0,
+        tested_topics: 0,
+        coverage_percent: 0,
+      });
+    }
+    const entry = teacherSummaryMap.get(r.teacher_id);
+    entry.total_topics += r.total_topics;
+    entry.completed_topics += r.completed_topics;
+    entry.tested_topics += r.tested_topics;
+  }
+  const teacher_summary = Array.from(teacherSummaryMap.values()).map((t: any) => ({
+    ...t,
+    coverage_percent: t.total_topics > 0 ? Math.round((t.completed_topics / t.total_topics) * 100) : 0,
+  }));
+
+  const missing_topic_subjects = rows.filter((r: any) => r.total_topics === 0);
+  const missingTeacherMap = new Map<number, { teacher_id: number; teacher_name: string; missing_subjects: number }>();
+  for (const r of missing_topic_subjects) {
+    if (!r.teacher_id) continue;
+    if (!missingTeacherMap.has(r.teacher_id)) {
+      missingTeacherMap.set(r.teacher_id, {
+        teacher_id: r.teacher_id,
+        teacher_name: r.teacher_name,
+        missing_subjects: 0,
+      });
+    }
+    missingTeacherMap.get(r.teacher_id)!.missing_subjects += 1;
+  }
+  const teachers_missing_topic_setup = Array.from(missingTeacherMap.values());
+
+  res.json({ summary, teacher_summary, rows, missing_topic_subjects, teachers_missing_topic_setup });
+});
+
+app.get('/api/alerts/missing-topics', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'teacher') {
+    return res.json({ alerts: [] });
+  }
+
+  const teacherId = Number(req.userId);
+  const { data: assignments, error: assignError } = await supabase
+    .from('assignments')
+    .select('subject_id, subjects(name, form, code)')
+    .eq('teacher_id', teacherId);
+  if (assignError) return res.status(500).json({ error: assignError.message });
+
+  const assignmentList = assignments || [];
+  if (assignmentList.length === 0) return res.json({ alerts: [] });
+
+  const subjectIds = assignmentList.map((a: any) => a.subject_id);
+  const { data: topics, error: topicsError } = await supabase
+    .from('topics')
+    .select('id, subject_id')
+    .in('subject_id', subjectIds);
+  if (topicsError) return res.status(500).json({ error: topicsError.message });
+
+  const topicCountBySubject = new Map<number, number>();
+  for (const t of topics || []) {
+    topicCountBySubject.set(t.subject_id, (topicCountBySubject.get(t.subject_id) || 0) + 1);
+  }
+
+  const { data: streamSubjects } = await supabase
+    .from('stream_subjects')
+    .select('subject_id, stream_id')
+    .in('subject_id', subjectIds);
+  const streamIds = Array.from(new Set((streamSubjects || []).map((ss: any) => ss.stream_id)));
+  const { data: streams } = streamIds.length > 0
+    ? await supabase.from('streams').select('id, name').in('id', streamIds)
+    : { data: [], error: null as any };
+  const streamNameById = new Map((streams || []).map((s: any) => [s.id, s.name]));
+
+  const streamNamesBySubject = new Map<number, string[]>();
+  for (const ss of streamSubjects || []) {
+    if (!streamNamesBySubject.has(ss.subject_id)) streamNamesBySubject.set(ss.subject_id, []);
+    const n = streamNameById.get(ss.stream_id);
+    if (n) streamNamesBySubject.get(ss.subject_id)!.push(n);
+  }
+
+  const alerts = assignmentList
+    .filter((a: any) => !topicCountBySubject.get(a.subject_id))
+    .map((a: any) => {
+      const subjectName = a.subjects?.name || 'Subject';
+      const form = a.subjects?.form || '';
+      const streamNames = Array.from(new Set(streamNamesBySubject.get(a.subject_id) || []));
+      const message = streamNames.length > 0
+        ? `Please create topics for ${subjectName} ${streamNames[0]}.`
+        : `You have not set topics for ${subjectName} ${form}.`;
+      return {
+        type: 'missing_topics',
+        priority: 'high',
+        subject_id: a.subject_id,
+        subject_name: subjectName,
+        form,
+        stream_names: streamNames,
+        message,
+      };
+    });
+
+  res.json({ alerts });
 });
 
 // ========== EXAMS ==========
@@ -1260,6 +1725,16 @@ app.get('/api/curriculum/overview', authenticateToken, async (req, res) => {
   const { form } = req.query;
   let query = supabase.from('subjects').select('*');
   if (form) query = query.eq('form', form);
+  if (req.userRole === 'teacher') {
+    const { data: teacherAssignments, error: assignmentError } = await supabase
+      .from('assignments')
+      .select('subject_id')
+      .eq('teacher_id', req.userId);
+    if (assignmentError) return res.status(500).json({ error: assignmentError.message });
+    const allowedSubjectIds = (teacherAssignments || []).map((a: any) => a.subject_id);
+    if (allowedSubjectIds.length === 0) return res.json([]);
+    query = query.in('id', allowedSubjectIds);
+  }
   
   const { data: subjects } = await query;
   
@@ -1267,10 +1742,12 @@ app.get('/api/curriculum/overview', authenticateToken, async (req, res) => {
     (subjects || []).map(async (s: any) => {
       const { data: topics } = await supabase
         .from('topics')
-        .select('status, tested')
+        .select('status, tested, deadline')
         .eq('subject_id', s.id);
       
       const topicList = topics || [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
       return {
         id: s.id,
         name: s.name,
@@ -1281,7 +1758,8 @@ app.get('/api/curriculum/overview', authenticateToken, async (req, res) => {
         completed_topics: topicList.filter((t: any) => t.status === 'completed').length,
         on_progress_topics: topicList.filter((t: any) => t.status === 'on_progress').length,
         pending_topics: topicList.filter((t: any) => t.status === 'pending').length,
-        tested_topics: topicList.filter((t: any) => t.tested).length
+        tested_topics: topicList.filter((t: any) => t.tested).length,
+        overdue_topics: topicList.filter((t: any) => t.deadline && t.status !== 'completed' && new Date(t.deadline) < today).length
       };
     })
   );

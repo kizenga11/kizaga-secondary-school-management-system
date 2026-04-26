@@ -63,6 +63,16 @@ export default function App() {
     }
     return { school_name: 'KITUKUTU TECHNICAL SCHOOL' };
   });
+  const [missingTopicAlerts, setMissingTopicAlerts] = useState<Array<{
+    type: 'missing_topics';
+    priority: 'high';
+    subject_id: number;
+    subject_name: string;
+    form: string;
+    stream_names: string[];
+    message: string;
+  }>>([]);
+  const [missingTopicsDismissed, setMissingTopicsDismissed] = useState(false);
 
   const fetchSchoolSettings = async (authToken: string) => {
     try {
@@ -108,6 +118,26 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    const fetchMissingTopicAlerts = async () => {
+      if (!token || !user || user.role !== 'teacher') {
+        setMissingTopicAlerts([]);
+        return;
+      }
+      try {
+        const res = await fetch('/api/alerts/missing-topics', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) return;
+        setMissingTopicAlerts(Array.isArray(data?.alerts) ? data.alerts : []);
+      } catch {
+        // Ignore alert fetch errors
+      }
+    };
+    fetchMissingTopicAlerts();
+  }, [token, user]);
+
+  useEffect(() => {
     const handler = () => {
       try {
         const raw = localStorage.getItem(SETTINGS_KEY);
@@ -139,6 +169,7 @@ export default function App() {
     localStorage.setItem('token', newToken);
     localStorage.setItem('user', JSON.stringify(newUser));
     setView('dashboard');
+    setMissingTopicsDismissed(false);
   };
 
   const handleLogout = async () => {
@@ -146,6 +177,8 @@ export default function App() {
     setToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    setMissingTopicAlerts([]);
+    setMissingTopicsDismissed(false);
     try {
       await supabase.auth.signOut();
     } catch {
@@ -166,7 +199,7 @@ export default function App() {
       case 'subjects': return <SubjectsList token={token!} />;
       case 'curriculum': return <Curriculum token={token!} userRole={user.role} userId={user.id} />;
       case 'examination': return <Examination token={token!} userRole={user.role} userId={user.id} />;
-      case 'results': return <ResultsEntry token={token!} userRole={user.role} />;
+      case 'results': return <ResultsEntry token={token!} userRole={user.role} userId={user.id} />;
       case 'reports': return <Reports token={token!} />;
       case 'assignments': return <Assignments token={token!} />;
       case 'classes': return <Streams token={token!} />;
@@ -277,6 +310,44 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 md:h-screen md:overflow-y-auto p-0 md:p-4">
         <div className="max-w-6xl mx-auto md:my-3 md:mr-3 bg-white md:rounded-2xl md:border md:border-slate-200 md:shadow-sm p-4 md:p-8 min-h-[calc(100dvh-2rem)] md:min-h-0">
+          {user.role === 'teacher' && missingTopicAlerts.length > 0 && !missingTopicsDismissed && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle size={18} className="text-amber-700 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">High Priority Warning</p>
+                    <div className="mt-1 space-y-1">
+                      {missingTopicAlerts.slice(0, 3).map((a) => (
+                        <p key={`${a.subject_id}-${a.type}`} className="text-xs text-amber-900 font-semibold">
+                          {a.message}
+                        </p>
+                      ))}
+                      {missingTopicAlerts.length > 3 && (
+                        <p className="text-[10px] uppercase tracking-widest text-amber-700 font-bold">
+                          +{missingTopicAlerts.length - 3} more subject alerts
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setView('curriculum')}
+                    className="btn-dark px-4 py-2 !text-[10px]"
+                  >
+                    Create Topics
+                  </button>
+                  <button
+                    onClick={() => setMissingTopicsDismissed(true)}
+                    className="px-3 py-2 rounded-md border border-amber-300 text-[10px] font-black uppercase tracking-widest text-amber-700 hover:bg-amber-100"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <AnimatePresence mode="wait">
             <motion.div
               key={view}
