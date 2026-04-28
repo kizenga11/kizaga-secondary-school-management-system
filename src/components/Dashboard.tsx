@@ -82,7 +82,7 @@ export default function Dashboard({ user, setView }: DashboardProps) {
       const [students, subjects, users, curriculum, exams] = await Promise.all([
         fetchJson('/api/students'),
         fetchJson('/api/subjects'),
-        fetchJson('/api/users'),
+        user.role === 'headmaster' || user.role === 'academic' ? fetchJson('/api/users') : Promise.resolve(null),
         fetchJson('/api/curriculum/overview'),
         fetchJson('/api/exams'),
       ]);

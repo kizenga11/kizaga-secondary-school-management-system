@@ -330,10 +330,10 @@ export default function Reports({ token }: ReportsProps) {
   };
 
   const tabs = [
-    { id: 'teaching' as const, label: 'Teaching' },
-    { id: 'exams' as const, label: 'Exams' },
-    { id: 'students' as const, label: 'Students' },
-    { id: 'teachers' as const, label: 'Teachers' },
+    { id: 'teaching' as const, label: 'Topic Coverage' },
+    { id: 'exams' as const, label: 'Exam Analysis' },
+    { id: 'students' as const, label: 'Class Range' },
+    { id: 'teachers' as const, label: 'Teacher Details' },
   ];
 
   const teachingTeachers = useMemo(
@@ -371,10 +371,28 @@ export default function Reports({ token }: ReportsProps) {
     <div className="space-y-6">
       <header className="section-header">
         <div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">REPORTS <span className="text-brand-primary">CENTER</span></h2>
-          <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest opacity-60">Teaching, exams, students and teachers reports</p>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">ANALYTICS <span className="text-brand-primary">CENTER</span></h2>
+          <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest opacity-60">All reports in one place: teaching, exams, topics, class range, teachers</p>
         </div>
       </header>
+
+      <div className="card-app p-4">
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Available Report Groups</p>
+        <div className="flex flex-wrap gap-2">
+          {[
+            'Teaching Results',
+            'Exam Analysis',
+            'Topic Coverage',
+            'Topic Results',
+            'Teacher Details',
+            'Class Range',
+          ].map((label) => (
+            <span key={label} className="px-2.5 py-1 rounded-md border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-50">
+              {label}
+            </span>
+          ))}
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         {tabs.map(t => (

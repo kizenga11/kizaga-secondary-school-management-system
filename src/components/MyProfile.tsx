@@ -10,6 +10,8 @@ interface MyProfileProps {
 
 export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps) {
   const [data, setData] = useState({
+    role: '',
+    user_id: '',
     full_name: '',
     tsc_no: '',
     email: '',
@@ -44,6 +46,8 @@ export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps
         throw new Error(json?.error || 'Failed to load profile');
       }
       setData({
+        role: json.role || '',
+        user_id: json.user_id || '',
         full_name: json.full_name || '',
         tsc_no: json.tsc_no || '',
         email: json.email || '',
@@ -79,10 +83,16 @@ export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps
       showError('NIDA Number must be exactly 20 digits');
       return;
     }
+    if (data.cheque_no && !/^\d{4,}$/.test(String(data.cheque_no).trim())) {
+      showError('Cheque Number must be digits only, with at least 4 digits');
+      return;
+    }
 
     // Convert empty strings to null for date fields
     const body = {
       ...data,
+      role: undefined,
+      user_id: undefined,
       employment_date: data.employment_date || null,
       confirmation_date: data.confirmation_date || null,
       retirement_date: data.retirement_date || null,
@@ -134,6 +144,17 @@ export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps
       </header>
 
       <form onSubmit={save} className="card-app p-6 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="label-app">Role</label>
+            <input type="text" value={data.role} disabled className="input-app opacity-50" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="label-app">Auth User ID</label>
+            <input type="text" value={data.user_id} disabled className="input-app opacity-50 font-mono text-[11px]" />
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="label-app">Full Name</label>
@@ -152,7 +173,9 @@ export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps
               value={data.tsc_no}
               onChange={(e) => setData({ ...data, tsc_no: e.target.value })}
               className="input-app"
+              placeholder="e.g. K15078"
             />
+            <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Example: K15078</p>
           </div>
         </div>
 
@@ -228,6 +251,20 @@ export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps
           </div>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="label-app">Cheque Number</label>
+            <input
+              type="text"
+              value={data.cheque_no}
+              onChange={(e) => setData({ ...data, cheque_no: e.target.value })}
+              className="input-app"
+              placeholder="e.g. 11021188"
+            />
+            <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Digits only. Minimum 4 digits (e.g. 11021188).</p>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="label-app">Employment Date</label>
@@ -265,7 +302,9 @@ export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps
             value={data.studied_subjects}
             onChange={(e) => setData({ ...data, studied_subjects: e.target.value })}
             className="input-app resize-none"
+            placeholder="Use comma-separated format. Example: Mathematics, Physics, Chemistry"
           />
+          <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Format: Subject 1, Subject 2, Subject 3</p>
         </div>
 
         <div>
@@ -275,7 +314,9 @@ export default function MyProfile({ token, user, onUserUpdated }: MyProfileProps
             value={data.teaching_subjects}
             onChange={(e) => setData({ ...data, teaching_subjects: e.target.value })}
             className="input-app resize-none"
+            placeholder="Use comma-separated format. Example: Mathematics Form 1, Physics Form 3"
           />
+          <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Tip: include subject and class for clarity.</p>
         </div>
 
         <div className="pt-4">

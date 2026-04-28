@@ -71,7 +71,10 @@ function Examination({ token, userRole }: ExaminationProps) {
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [examSubjects, setExamSubjects] = useState<any[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
+  const [selectedSubject, setSelectedSubject] = useState<any | null>(null);
+  const [teacherSubjects, setTeacherSubjects] = useState<any[]>([]);
   const [results, setResults] = useState<{ subjects: Subject[]; students: StudentResult[] } | null>(null);
   const [divisionSummary, setDivisionSummary] = useState<any>(null);
   const [trends, setTrends] = useState<any>(null);
@@ -79,7 +82,7 @@ function Examination({ token, userRole }: ExaminationProps) {
   const [showNewExamModal, setShowNewExamModal] = useState(false);
   const [showComposeModal, setShowComposeModal] = useState(false);
   const [showScoresModal, setShowScoresModal] = useState(false);
-  const [editingScores, setEditingScores] = useState<Record<number, Record<number, { score: string; absent: boolean }>>({});
+  const [editingScores, setEditingScores] = useState<{ [key: number]: { [key: number]: { score: string; absent: boolean } } }>({});
 
   const [newExam, setNewExam] = useState({ name: '', form: 'Form 1' });
   const [composeData, setComposeData] = useState({ name: '', exam_weights: [] as { exam_id: number; weight: number }[] });
@@ -88,7 +91,30 @@ function Examination({ token, userRole }: ExaminationProps) {
 
   useEffect(() => {
     fetch('/api/subjects', { headers }).then(r => r.json()).then(setSubjects);
-  }, [headers]);
+    
+    // Fetch teacher's assigned subjects if user is a teacher
+    if (userRole === 'teacher') {
+      fetch('/api/assignments', { headers })
+        .then(r => r.json())
+        .then(assignments => {
+          console.log('Teacher assignments:', assignments);
+          if (assignments.length > 0) {
+            console.log('First assignment structure:', assignments[0]);
+            console.log('subjects object:', assignments[0].subjects);
+          }
+          const teacherSubj = assignments.map((a: any) => ({
+            id: a.subject_id,
+            name: a.subjects?.name || a.subject_name,
+            code: a.subjects?.code || a.subject_code,
+            form: a.subjects?.form || a.form,
+            has_practical: a.subjects?.has_practical || a.has_practical,
+            assignment_id: a.id
+          }));
+          console.log('Teacher subjects:', teacherSubj);
+          setTeacherSubjects(teacherSubj);
+        });
+    }
+  }, [headers, userRole]);
 
   useEffect(() => {
     fetchExams();
@@ -99,6 +125,29 @@ function Examination({ token, userRole }: ExaminationProps) {
       fetchExamDetails();
     }
   }, [selectedExam]);
+
+  useEffect(() => {
+    if (selectedSubject && students.length > 0) {
+      // Filter students by form and subject enrollment
+      const filtered = students.filter(student => {
+        // First filter by form (student should be in the same form as the selected exam)
+        if (selectedExam && student.form !== selectedExam.form) {
+          return false;
+        }
+        
+        // For now, show all students in the form
+        // TODO: Filter by actual subject enrollment when student_subjects table is populated
+        return true;
+      });
+      setFilteredStudents(filtered);
+    } else {
+      // If no subject selected, show all students in the exam's form
+      const formFiltered = selectedExam 
+        ? students.filter(student => student.form === selectedExam.form)
+        : students;
+      setFilteredStudents(formFiltered);
+    }
+  }, [selectedSubject, students, selectedExam]);
 
   const fetchExams = async () => {
     const res = await fetch('/api/exams', { headers });
@@ -115,7 +164,8 @@ function Examination({ token, userRole }: ExaminationProps) {
         fetch(`/api/exams/${selectedExam.id}/students`, { headers }),
         fetch(`/api/exams/${selectedExam.id}/scores`, { headers }),
       ]);
-      setExamSubjects(await subjRes.json());
+      const subjData = await subjRes.json();
+setExamSubjects(Array.isArray(subjData) ? subjData : []);
       setStudents(await studRes.json());
       setScores(await scoresRes.json());
     } finally {
@@ -327,7 +377,24 @@ function Examination({ token, userRole }: ExaminationProps) {
               <h3 className="font-bold">{selectedExam.name}</h3>
               <p className="text-[10px] opacity-80">{selectedExam.form} • {selectedExam.type}</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+              {userRole === 'teacher' && (
+                <select
+                  value={selectedSubject?.id || ''}
+                  onChange={(e) => {
+                    console.log('Selected value:', e.target.value);
+                    const subject = teacherSubjects.find(s => s.id === Number(e.target.value));
+                    console.log('Found subject:', subject);
+                    setSelectedSubject(subject || null);
+                  }}
+                  className="bg-white border border-slate-300 text-slate-700 px-3 py-1 rounded text-sm"
+                >
+                  <option value="">Choose Subject</option>
+                  {teacherSubjects.map(s => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                  ))}
+                </select>
+              )}
               {isAcademic && examSubjects.length === 0 && <button onClick={handleAddSubjects} className="btn-dark text-xs">Add All Subjects</button>}
               {scores.length > 0 && <button onClick={handleSaveScores} className="btn-dark text-xs">Save Scores</button>}
             </div>
@@ -335,6 +402,11 @@ function Examination({ token, userRole }: ExaminationProps) {
           <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
             {loading ? (
               <div className="p-12 text-center text-slate-300">Loading...</div>
+            ) : userRole === 'teacher' && !selectedSubject ? (
+              <div className="p-12 text-center text-slate-300">
+                <div className="text-lg font-semibold mb-2">Please select a subject to enter scores</div>
+                <div className="text-sm">Choose your assigned subject from the dropdown above</div>
+              </div>
             ) : (
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-slate-50">
@@ -342,38 +414,103 @@ function Examination({ token, userRole }: ExaminationProps) {
                     <th className="px-4 py-3">CNO</th>
                     <th className="px-4 py-3">Name</th>
                     <th className="px-4 py-3">Sex</th>
-                    {examSubjects.map(s => <th key={s.id} className="px-4 py-3 text-center">{s.subject_code}</th>)}
+                    {userRole === 'teacher' && selectedSubject ? (
+                    <th key={selectedSubject.id} className="px-2 py-2 text-center">
+                      <div className="text-xs font-bold text-slate-700">{selectedSubject.name}</div>
+                      <div className="text-[9px] text-slate-500 font-mono">{selectedSubject.code}</div>
+                    </th>
+                  ) : (
+                    Array.isArray(examSubjects) ? examSubjects.map(s => (
+                    <th key={s.id} className="px-2 py-2 text-center">
+                      <div className="text-xs font-bold text-slate-700">{s.subject_name || s.name}</div>
+                      <div className="text-[9px] text-slate-500 font-mono">{s.subject_code}</div>
+                    </th>
+                  )) : null
+                  )}
                   </tr>
                 </thead>
                 <tbody className="text-[13px]">
-                  {students.map(st => {
+                  {filteredStudents.map(st => {
                     const studentScores = scores.filter(s => s.student_id === st.id);
                     return (
                       <tr key={st.id} className="border-b border-slate-50 hover:bg-slate-50">
                         <td className="px-4 py-2 font-mono text-slate-500">{st.id}</td>
                         <td className="px-4 py-2 font-semibold">{st.full_name}</td>
                         <td className="px-4 py-2">{st.gender === 'Female' ? 'F' : 'M'}</td>
-                        {examSubjects.map(sub => {
-                          const sc = studentScores.find(s => s.subject_id === sub.subject_id);
-                          return (
-                            <td key={sub.id} className="px-2 py-2 text-center">
+                        {userRole === 'teacher' && selectedSubject ? (
+                          <td key={selectedSubject.id} className="px-2 py-2">
+                            <div className="flex items-center gap-2">
+                              <div className="flex flex-col gap-1">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  placeholder="Theory"
+                                  value={editingScores[st.id]?.[selectedSubject.id]?.theory || ''}
+                                  onChange={(e) => {
+                                    const newScores = { ...editingScores };
+                                    if (!newScores[st.id]) newScores[st.id] = {};
+                                    if (!newScores[st.id][selectedSubject.id]) newScores[st.id][selectedSubject.id] = { theory: '', practical: '', absent: false };
+                                    newScores[st.id][selectedSubject.id].theory = e.target.value;
+                                    setEditingScores(newScores);
+                                  }}
+                                  className="w-16 text-center text-xs py-1 border border-slate-200 rounded"
+                                />
+                                {selectedSubject.has_practical && (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    placeholder="Prac"
+                                    value={editingScores[st.id]?.[selectedSubject.id]?.practical || ''}
+                                    onChange={(e) => {
+                                      const newScores = { ...editingScores };
+                                      if (!newScores[st.id]) newScores[st.id] = {};
+                                      if (!newScores[st.id][selectedSubject.id]) newScores[st.id][selectedSubject.id] = { theory: '', practical: '', absent: false };
+                                      newScores[st.id][selectedSubject.id].practical = e.target.value;
+                                      setEditingScores(newScores);
+                                    }}
+                                    className="w-16 text-center text-xs py-1 border border-slate-200 rounded"
+                                  />
+                                )}
+                              </div>
                               <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={sc?.absent ? 'ABS' : (sc?.score ?? '')}
-                                disabled={!isAcademic}
+                                type="checkbox"
+                                checked={editingScores[st.id]?.[selectedSubject.id]?.absent || false}
                                 onChange={(e) => {
                                   const newScores = { ...editingScores };
                                   if (!newScores[st.id]) newScores[st.id] = {};
-                                  newScores[st.id][sub.subject_id] = { score: e.target.value, absent: false };
+                                  if (!newScores[st.id][selectedSubject.id]) newScores[st.id][selectedSubject.id] = { theory: '', practical: '', absent: false };
+                                  newScores[st.id][selectedSubject.id].absent = e.target.checked;
                                   setEditingScores(newScores);
                                 }}
-                                className="w-16 text-center text-xs py-1 border border-slate-200 rounded"
+                                className="w-4 h-4 text-brand-primary rounded"
                               />
-                            </td>
-                          );
-                        })}
+                            </div>
+                          </td>
+                        ) : (
+                          Array.isArray(examSubjects) ? examSubjects.map(sub => {
+                            const sc = studentScores.find(s => s.subject_id === sub.subject_id);
+                            return (
+                              <td key={sub.id} className="px-2 py-2 text-center">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  value={sc?.absent ? 'ABS' : (sc?.score ?? '')}
+                                  disabled={!isAcademic}
+                                  onChange={(e) => {
+                                    const newScores = { ...editingScores };
+                                    if (!newScores[st.id]) newScores[st.id] = {};
+                                    newScores[st.id][sub.subject_id] = { score: e.target.value, absent: false };
+                                    setEditingScores(newScores);
+                                  }}
+                                  className="w-16 text-center text-xs py-1 border border-slate-200 rounded"
+                                />
+                              </td>
+                            );
+                          }) : null
+                        )}
                       </tr>
                     );
                   })}

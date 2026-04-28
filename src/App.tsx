@@ -34,6 +34,7 @@ import ResultsEntry from './components/ResultsEntry.tsx';
 import Reports from './components/Reports.tsx';
 import Assignments from './components/Assignments.tsx';
 import Streams from './components/Streams.tsx';
+import StudentAssignments from './components/StudentAssignments.tsx';
 import SchoolSettings from './components/SchoolSettings.tsx';
 import MyProfile from './components/MyProfile.tsx';
 
@@ -202,6 +203,7 @@ export default function App() {
       case 'results': return <ResultsEntry token={token!} userRole={user.role} userId={user.id} />;
       case 'reports': return <Reports token={token!} />;
       case 'assignments': return <Assignments token={token!} />;
+      case 'student-assignments': return <StudentAssignments token={token!} />;
       case 'classes': return <Streams token={token!} />;
       case 'settings': return <SchoolSettings token={token!} />;
       default: return <Dashboard user={user} setView={setView} />;
@@ -216,6 +218,7 @@ export default function App() {
     { id: 'subjects', label: 'Subjects', icon: BookOpen, roles: ['headmaster', 'academic'] },
     { id: 'classes', label: 'Classes/Streams', icon: Layers, roles: ['headmaster', 'academic'] },
     { id: 'assignments', label: 'Deployments', icon: UserPlus, roles: ['headmaster', 'academic'] },
+{ id: 'student-assignments', label: 'Student Assignments', icon: GraduationCap, roles: ['headmaster', 'academic'] },
 { id: 'curriculum', label: 'Curriculum & Topics', icon: FileText, roles: ['teacher', 'academic', 'headmaster'] },
     { id: 'examination', label: 'Examination', icon: CheckCircle2, roles: ['headmaster', 'academic', 'teacher'] },
     { id: 'results', label: 'Exam Results', icon: CheckCircle2, roles: ['teacher', 'academic'] },

@@ -46,6 +46,27 @@ CREATE TABLE public.school_settings (
   id bigint NOT NULL DEFAULT 1 CHECK (id = 1),
   school_name text NOT NULL DEFAULT 'Kitukutu Technical School'::text,
   academic_year text NOT NULL DEFAULT '2026'::text,
+  address text,
+  phone text,
+  email text,
+  region text,
+  district text,
+  ward text,
+  postal_code text,
+  website text,
+  motto text,
+  vision text,
+  mission text,
+  establishment_year text,
+  school_type text,
+  registration_number text,
+  bank_name text,
+  bank_account text,
+  headmaster_name text,
+  headmaster_phone text,
+  academic_head_name text,
+  academic_head_phone text,
+  logo_url text,
   CONSTRAINT school_settings_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.stream_subjects (
@@ -137,4 +158,14 @@ CREATE TABLE public.users (
   gender text,
   tsc_no text UNIQUE,
   CONSTRAINT users_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.student_subjects (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  student_id bigint NOT NULL,
+  subject_id bigint NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT student_subjects_pkey PRIMARY KEY (id),
+  CONSTRAINT student_subjects_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.students(id) ON DELETE CASCADE,
+  CONSTRAINT student_subjects_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES public.subjects(id) ON DELETE CASCADE
 );

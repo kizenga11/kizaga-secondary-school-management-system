@@ -568,9 +568,16 @@ app.delete('/api/subjects/:id', authenticateToken, async (req, res) => {
 
 // ========== ASSIGNMENTS ==========
 app.get('/api/assignments', authenticateToken, async (req, res) => {
-  const { data, error } = await supabase
+  let query = supabase
     .from('assignments')
-    .select('*, users(full_name), subjects(name, form)');
+    .select('*, users(full_name), subjects(name, code, form, has_practical)');
+  
+  // If user is a teacher, only show their assignments
+  if (req.userRole === 'teacher') {
+    query = query.eq('teacher_id', req.userId);
+  }
+  
+  const { data, error } = await query;
   
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
@@ -1595,6 +1602,44 @@ app.put('/api/settings/school', authenticateToken, async (req,res)=>{
  }
 });
 
+// ========== STUDENT ASSIGNMENTS ==========
+app.get('/api/student-assignments', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'headmaster' && req.userRole !== 'academic') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  const { data, error } = await supabase.from('student_subjects').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+  
+  res.json(data || []);
+});
+
+app.post('/api/student-assignments', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'headmaster' && req.userRole !== 'academic') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  const { assignments } = req.body;
+  if (!Array.isArray(assignments)) {
+    return res.status(400).json({ error: 'Assignments array required' });
+  }
+  
+  try {
+    // Delete existing assignments first
+    await supabase.from('student_subjects').delete().neq('id', 0);
+    
+    // Insert new assignments
+    if (assignments.length > 0) {
+      const { error } = await supabase.from('student_subjects').insert(assignments);
+      if (error) return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({ message: 'Student assignments saved successfully' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== REPORTS ==========
 app.get('/api/reports/teaching', authenticateToken, async (req, res) => {
   if (req.userRole !== 'headmaster' && req.userRole !== 'academic') {
@@ -1611,12 +1656,19 @@ app.get('/api/reports/teaching', authenticateToken, async (req, res) => {
         .select('status, tested')
         .eq('subject_id', s.id);
       
+      // Get assigned teacher for this subject
+      const { data: assignment } = await supabase
+        .from('assignments')
+        .select('users!inner(full_name)')
+        .eq('subject_id', s.id)
+        .single();
+      
       const topicList = topics || [];
       return {
         form: s.form,
         code: s.code,
         subject: s.name,
-        teacher: '',
+        teacher: assignment?.users?.full_name || 'Unassigned',
         total_topics: topicList.length,
         completed_topics: topicList.filter((t: any) => t.status === 'completed').length,
         on_progress_topics: topicList.filter((t: any) => t.status === 'on_progress').length,
@@ -1718,6 +1770,22 @@ app.put('/api/settings/school', authenticateToken, async (req, res) => {
   
   if (error) return res.status(400).json({ error: error.message });
   res.json({ message: 'School settings saved' });
+});
+
+// ========== FILE UPLOADS ==========
+app.post('/api/upload/logo', authenticateToken, async (req, res) => {
+  if (req.userRole !== 'headmaster' && req.userRole !== 'academic') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    // For now, return a placeholder URL
+    // In production, you'd upload to a storage service like Supabase Storage, AWS S3, etc.
+    const logoUrl = `/uploads/logo-${Date.now()}.png`;
+    res.json({ url: logoUrl });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ========== CURRICULUM OVERVIEW ==========
